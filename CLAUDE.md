@@ -6,7 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Lingo Reader: a clean-room, LingQ-style language-learning PWA (import content → read with words colour-coded by status → save LingQs → spaced-repetition review → track a known-word pool). It reimplements LingQ's *method* only — never copy LingQ code, assets, content, or call its private API.
 
-Plain HTML/CSS/vanilla ES modules. **No build step, no package.json, no dependencies.** All data lives in the browser's IndexedDB; the only network calls are dictionary lookups (Wiktionary REST + MyMemory, both CORS-enabled, no keys) and the YouTube embed.
+Plain HTML/CSS/vanilla ES modules. **No build step, no package.json, no dependencies** (transformers.js for Whisper is loaded from jsDelivr inside a worker). Data lives in the browser's IndexedDB, optionally synced to the user's own free Supabase project.
+- **Free services only:** the user won't pay for APIs. Never add paid services or models; their ChatGPT subscription is used only by opening chatgpt.com.
 
 ## Workflow
 
@@ -16,7 +17,15 @@ Commit after each finished feature or fix (one logical change per commit, impera
 
 The machine has no Node, Python, or git — tooling is PowerShell + Edge.
 
-- **Run:** `powershell -ExecutionPolicy Bypass -File serve.ps1` → http://localhost:8080 (`-Port N` to change, `-Lan` to expose on Wi-Fi; needs a one-time `netsh http add urlacl` as admin). ES modules and the service worker require http(s), so `file://` won't work.
+- **Run:** `powershell -ExecutionPolicy Bypass -File serve.ps1` → http://localhost:8080. The user double-clicks `Start Lingo Reader.bat`.
+  - Options: `-Port N` to change the port; `-Lan` to expose it on Wi-Fi (needs a one-time `netsh http add urlacl` as admin).
+  - ES modules and the service worker require http(s), so `file://` won't work.
+  - An already-running old server keeps the port. Restart it after changing `serve.ps1`.
+- **serve.ps1 API:**
+  - `/api/transcript`: YouTube captions.
+  - `/api/audio?v=<id>`: a video's audio via yt-dlp (installed with winget, along with Deno and FFmpeg), cached in `%TEMP%\lingo-audio`.
+  - `/api/capabilities`: what this server can do.
+  - On static hosting these are absent, and the client falls back.
 - **Tests:** `tests/smoke.html` is the whole suite — unit checks for `text.js`/`srs.js` plus an end-to-end run that drives the real app inside an iframe (import → reader → panel → phrase → paging → vocab → review → stats). Open `http://localhost:<port>/tests/smoke.html`; results go into `<pre id="out">` and `body[data-done="1"]` is set when finished. It writes data into that origin's IndexedDB, so run it on a different port from the one you use day-to-day. There is no per-test runner; to run a single check, temporarily comment out the others in the file.
 - **Headless:** `msedge --dump-dom` does not work for this app — real-time mode snapshots before the async boot finishes, and `--virtual-time-budget` stalls IndexedDB. Drive Edge over the DevTools protocol instead: launch `msedge --headless=new --remote-debugging-port=9333`, then poll `Runtime.evaluate` until `body.dataset.done === '1'`.
 - The app sets `body[data-ready="1"]` after boot and `body[data-error]` on any uncaught error or rejection — useful for automated checks.
@@ -64,14 +73,36 @@ Local audio/video blobs live in the `media` store, keyed by `lessonId`, and are 
 - The panel gets the exact sentence from `sentenceAt(text, charOffset)`, using the tapped span's `data-o`.
 - `rankByContext` picks the dictionary sense that appears in the sentence translation ("Meaning here").
 - `dict.js` `parseDefinition` reads Wiktionary form-of links (inflection → lemma). `lookupExpression` checks 2–3-word runs from `text.expressionCandidates`.
-- `explainInContext` uses Chrome's on-device Prompt API (`LanguageModel`, Gemini Nano) when available. It is feature-detected and absent in Edge and on phones.
-- `js/assist.js` handles "Still unclear?" escalation.
-  - In the app: OpenRouter **free models only**. `listModels` filters to `:free` models with zero price, and `askStronger` refuses non-free IDs. The user doesn't want to spend money, so never add paid models.
-  - In the browser: DeepSeek's free web chat (the question is copied) and ChatGPT (`chatgpt.com/?q=`, the user's subscription).
-  - The key lives in kv `secret:openrouter`. `db.exportAll` drops `secret:*` rows.
-- Tests stub these with `window.__lingoTranslate`, `__lingoDict`, `__lingoExpr`, `__lingoAI` and `__lingoAssist`.
+- Tests stub these with `window.__lingoTranslate`, `__lingoDict`, `__lingoExpr`, `__lingoAI`, `__lingoAssist` and `__lingoASR`.
 
-**IndexedDB schema** is in `js/db.js` (`DB_VERSION` 1; stores: lessons, media, words, dict, activity, kv). Schema changes require bumping `DB_VERSION` and handling them in `onupgradeneeded`. `words` and `activity` keys are `"<lang>|<term>"` and `"<YYYY-MM-DD>|<lang>"`.
+**Panel** (`js/panel.js`) has two modes: `word` (a word or a phrase of up to 10 words) and `selection` (a longer passage or several lines, also opened by the 💬 line button).
+- Order: the sentence, then the **explanation in the target language** (`#explain-area`), then levels and hint. Everything in the native language — translations, English explanations, the bilingual dictionary — is behind "Show English" (`#english-area`), unless `settings.showEnglish` is on.
+
+**AI explanations** (`js/explain.js`): `explain(input, {depth})` with `input = {kind: 'word' | 'passage', term, sentence, transcript}` returns `{target: {meaning, grammar, examples}, native: {…, translation}, lemma, part_of_speech, multiword_unit}`.
+- `quick` depth uses Gemini Nano (Chrome's `LanguageModel`, about 1.2k characters of transcript) and falls back to an OpenRouter free model. `deep` ("Still unclear?") uses OpenRouter with up to 30k characters of transcript.
+- `js/assist.js` has OpenRouter (**free `:free` models only**; it refuses any other ID) and the hand-offs:
+  - ChatGPT: `chatgpt.com/?temporary-chat=true&q=`, a private chat.
+  - DeepSeek: the question is copied, because the site can't be prefilled.
+- The OpenRouter key lives in kv `secret:openrouter`. It is never synced or backed up.
+
+**AI transcription** (`js/asr.js` + `js/asr-worker.js`): Whisper via transformers.js 3.8.1 (the self-contained `transformers.min.js` build; the `.web` build has bare imports).
+- It uses WebGPU only when `requestAdapter()` succeeds, otherwise WASM in a fresh worker.
+- Audio is transcribed in 2-minute blocks cut at quiet points. The result becomes a WebVTT transcript.
+- `js/check.js` compares transcript lines with what the recognition heard in each line's time window (LCS alignment) and produces `lesson.flags[segIdx] = [{o, len, said, heard, manual?}]`. Users can also flag selections by hand. Editing a line (`state.updateLessonLine`) updates word counts and the pool, and drops that line's flags.
+
+**Accounts and sync** (`js/cloud.js`, `js/views/account.js`, `docs/supabase-setup.sql`):
+- **Accounts:** the account list and sessions live in localStorage. Each account has its own IndexedDB `lingo-reader-<userId>` (`db.useDatabase`); `lingo-reader` is the unsynced "This device only" profile.
+- **Sync model:** last-write-wins per record on `updatedAt`. Push goes through RPC `push_records` (the server keeps the newer row); pull pages by the server's `synced_at` cursor. Deletions travel as tombstones; media goes to Storage bucket `media/<uid>/<lessonId>`.
+- **Server settings:** they come from `js/config.js` or the Account screen.
+
+**IndexedDB schema** is in `js/db.js` (`DB_VERSION` 2; stores: lessons, media, words, dict, activity, kv, tombstones).
+- **Changing the schema:** bump `DB_VERSION` and migrate in `onupgradeneeded`.
+- **Writes:** writes to synced stores stamp `updatedAt` and notify `db.onChange`. Sync uses `putRaw`/`delRaw`, which do neither.
+- **Keys:**
+  - Lesson ids are unique strings (`newLessonId()`).
+  - `words`: `"<lang>|<term>"`.
+  - `activity`: `"<YYYY-MM-DD>|<lang>|<deviceId>"`, summed per day in stats.
+  - kv keys starting with `secret:` or `local:` stay on the device.
 
 **Service worker (`sw.js`)** is network-first with cache fallback. **When you add or rename a JS/CSS file, update its `SHELL` list** (and bump `CACHE` for breaking changes), or offline mode will miss the file.
 

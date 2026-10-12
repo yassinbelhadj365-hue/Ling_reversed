@@ -63,6 +63,18 @@ lessons (`freq`), which lessons contain it, how many times you've read past it (
 its status. *Text coverage* = share of all word occurrences in your content that you know —
 a good estimate of how comfortably you can read/listen to it.
 
+**Explanations in the language you're learning:** tapping a word, selecting a passage, or using a line's 💬 button gives an explanation in simple Spanish (or whichever language you're studying).
+- **What you get:** a paraphrase, a grammar note and example sentences, written by an AI that reads the whole transcript.
+- **Translations:** English is one tap away, under **Show English**.
+- **Still unclear?** Ask a stronger free model, DeepSeek's free chat, or a private ChatGPT chat (your subscription).
+- **Free only:** Chrome's built-in AI, or a free OpenRouter model ([setup in Settings](https://openrouter.ai/keys)).
+
+**AI transcription and transcript checking:** **Transcribe the audio with AI** (Import screen) writes a timed transcript with Whisper, running free on your computer. Use it for YouTube videos without captions, or for your own audio/video files.
+- **Check transcript against the audio** (in a video lesson's ⋯ menu) underlines words the audio doesn't seem to say. Tap one to replace it.
+- You can flag any word, sentence or stretch as wrong yourself, and correct any line with ✎.
+
+**Accounts and sync:** create one or more accounts (Account button, top right) to keep your progress in sync between your computer and phone. That covers vocabulary, lessons, transcripts and edits, stats, settings and audio files. It needs a free Supabase project you set up once; see [docs/SYNC_SETUP.md](docs/SYNC_SETUP.md).
+
 **Importing YouTube:** paste a video link on the Import screen and the transcript and title load
 automatically, in the language you're studying. You can pick another caption track if there are several.
 Auto-generated captions work too, with per-word timing. This needs the app running from
