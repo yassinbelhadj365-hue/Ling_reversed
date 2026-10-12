@@ -5,12 +5,6 @@ import * as db from './db.js';
 
 const CACHE_DAYS = 60;
 
-function stripHtml(html) {
-  const div = document.createElement('div');
-  div.innerHTML = html;
-  return div.textContent.replace(/\s+/g, ' ').trim();
-}
-
 export async function fetchJson(url, ms = 8000) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), ms);
@@ -25,26 +19,51 @@ export async function fetchJson(url, ms = 8000) {
   }
 }
 
-async function wiktionary(term, lang) {
+// One Wiktionary definition: an inflected form ("first-person plural ... of hablar")
+// is marked with formOf = its lemma, read from the form-of link in the markup.
+export function parseDefinition(html, pos) {
+  const div = document.createElement('div');
+  div.innerHTML = html;
+  const text = div.textContent.replace(/\s+/g, ' ').trim();
+  if (!text) return null;
+  const link = div.querySelector('.form-of-definition-link a[title], .form-of-definition a[title]:not([title^="Appendix:"])');
+  const def = { source: 'Wiktionary', pos, text };
+  if (link) def.formOf = link.getAttribute('title');
+  return def;
+}
+
+async function wiktionary(term, lang, { exactOnly = false } = {}) {
   const tries = [term];
   const lower = term.toLocaleLowerCase();
-  if (lower !== term) tries.push(lower);
+  if (!exactOnly && lower !== term) tries.push(lower);
   for (const t of tries) {
     const data = await fetchJson(
-      `https://en.wiktionary.org/api/rest_v1/page/definition/${encodeURIComponent(t)}?redirect=true`
+      `https://en.wiktionary.org/api/rest_v1/page/definition/${encodeURIComponent(t.replace(/ /g, '_'))}?redirect=true`
     );
     const entries = data?.[lang];
     if (!entries?.length) continue;
     const out = [];
     for (const e of entries) {
       for (const d of e.definitions || []) {
-        const text = stripHtml(d.definition || '');
-        if (text) out.push({ source: 'Wiktionary', pos: e.partOfSpeech, text });
+        const def = parseDefinition(d.definition || '', e.partOfSpeech);
+        if (def) out.push(def);
       }
     }
     if (out.length) return out.slice(0, 8);
   }
   return [];
+}
+
+// A multi-word expression ("a pesar de"), looked up as its own Wiktionary entry.
+// Negative results are cached too, so each candidate costs one request per month.
+export async function lookupExpression(surface, lang) {
+  if (window.__lingoExpr) return window.__lingoExpr(surface, lang); // smoke-test hook
+  const key = `w|${lang}|${surface}`;
+  const cached = await db.get('dict', key);
+  if (cached && Date.now() - cached.at < 30 * 864e5) return cached.results;
+  const results = (await wiktionary(surface, lang, { exactOnly: true })).filter((d) => !d.formOf);
+  await db.put('dict', { key, results, at: Date.now() });
+  return results;
 }
 
 async function myMemory(term, from, to) {
@@ -67,12 +86,19 @@ async function myMemory(term, from, to) {
   return out.slice(0, 4);
 }
 
+// -> [{source, pos, text, formOf?, lemma?}]: translations, then definitions; when the
+// word is an inflected form, the lemma's own definitions follow (marked `lemma`).
 export async function lookup(term, lang, native) {
-  const key = `${lang}|${native}|${term.toLocaleLowerCase()}`;
+  if (window.__lingoDict) return window.__lingoDict(term, lang, native); // smoke-test hook
+  const key = `v2|${lang}|${native}|${term.toLocaleLowerCase()}`;
   const cached = await db.get('dict', key);
   if (cached && Date.now() - cached.at < CACHE_DAYS * 864e5) return cached.results;
   const [defs, trans] = await Promise.all([wiktionary(term, lang), myMemory(term, lang, native)]);
-  const results = [...trans, ...defs];
+  const lemma = defs.find((d) => d.formOf)?.formOf;
+  const lemmaDefs = lemma && lemma.toLocaleLowerCase() !== term.toLocaleLowerCase()
+    ? (await wiktionary(lemma, lang)).filter((d) => !d.formOf).slice(0, 4).map((d) => ({ ...d, lemma }))
+    : [];
+  const results = [...trans, ...defs, ...lemmaDefs];
   if (results.length) await db.put('dict', { key, results, at: Date.now() });
   return results;
 }

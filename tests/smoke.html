@@ -5,7 +5,9 @@
 <iframe id="app" src="../index.html#/library" style="width:1000px;height:800px"></iframe>
 <script type="module">
 import { tokenize, parseAny, mergeCues, youTubeId, parseSubtitles, sentenceAt, hash32 } from '../js/text.js';
-import { chunkForMyMemory, pickMyMemory } from '../js/translate.js';
+import { chunkForMyMemory, pickMyMemory, rankByContext } from '../js/translate.js';
+import { parseDefinition } from '../js/dict.js';
+import { expressionCandidates } from '../js/text.js';
 import { grade, freshSrs } from '../js/srs.js';
 import { onLookup, onPass, onManual, onReview, undoPatch, computeStatus } from '../js/knowledge.js';
 import { buildTimeline, activeIndex, charAt } from '../js/sync.js';
@@ -110,6 +112,14 @@ try {
     { segment: 'Hoy vamos a hablar de comida.', translation: "Today we're going to talk about food.", 'created-by': 'MT!' },
   ] };
   ok(pickMyMemory(mm, 'Hoy vamos a hablar de comida.') === "Today we're going to talk about food.", 'MyMemory: fuzzy match for another sentence loses to the machine translation');
+  const rk = rankByContext([{ source: 'MyMemory', text: 'meal' }, { source: 'MyMemory', text: 'food' }], 'Today we will talk about food.', 'en');
+  ok(rk[0].text === 'food' && rk[0].fits && !rk[1].fits, 'rankByContext: the candidate found in the sentence translation ranks first');
+  ok(rankByContext([{ source: 'Wiktionary', text: 'to speak, talk' }], 'They talked all night', 'en')[0].fits, 'rankByContext: stem match (talk ~ talked)');
+  const formHtml = '<span class="form-of-definition"><a title="Appendix:Glossary">first-person</a> plural of <span class="form-of-definition-link"><i><a title="hablar">hablar</a></i></span></span>';
+  const fd = parseDefinition(formHtml, 'Verb');
+  ok(fd.formOf === 'hablar' && /plural of hablar/.test(fd.text), 'parseDefinition: inflected form → lemma');
+  const ec = expressionCandidates('Lo hizo a pesar de todo.', 'Lo hizo a pesar de todo.'.indexOf('pesar'), 'es');
+  ok(ec[0].surface === 'hizo a pesar' && ec.some((c) => c.surface === 'a pesar de') && ec.length === 5, 'expressionCandidates: 3- and 2-word runs around the word');
 
   // ---- unit: timeline (sync.js) ----
   const tl = buildTimeline([{ text: 'a b', start: 0 }, { text: 'c d', start: 4 }, { text: 'e f', start: 9 }]);
@@ -147,7 +157,12 @@ try {
   }
   const fake = makeFakePlayer();
   W().__lingoFakePlayer = fake.factory;
-  W().__lingoTranslate = async (text) => ({ text: '[EN] ' + text, source: 'Test' });
+  const EN = { 'Hoy vamos a hablar de comida.': "Today we're going to talk about food." };
+  W().__lingoTranslate = async (text) => ({ text: EN[text] || '[EN] ' + text, source: 'Test' });
+  W().__lingoDict = async (term) => term === 'comida'
+    ? [{ source: 'MyMemory', pos: 'translation', text: 'meal' }, { source: 'MyMemory', pos: 'translation', text: 'food' }]
+    : [];
+  W().__lingoExpr = async (surface) => surface === 'de comida' ? [{ source: 'Wiktionary', pos: 'Phrase', text: '(test) about food' }] : [];
 
   // ---- page mode: a timed transcript without media ----
   const preview = await importLesson('Prueba', `0:00\nHola a todos, bienvenidos al canal.\n0:04\nHoy vamos a hablar de comida.\n0:09\nLa comida española es muy rica.\n`);
@@ -167,8 +182,13 @@ try {
   ok([...D().querySelectorAll('#reader .w[data-n="comida"]')].every((s) => s.classList.contains('st-1')), 'tapping a word made it LingQ 1 automatically');
   ok(/Auto/.test(D().querySelector('#word-panel .auto-line')?.textContent || ''), 'panel shows the automatic-level line');
   ok(D().querySelector('#word-panel .ctx-sentence mark')?.textContent === 'comida', 'panel marks the tapped word in its sentence');
-  await until(() => /^\[EN\]/.test(D().querySelector('#word-panel .ctx-tr')?.textContent || ''));
-  ok(/^\[EN\] Hoy vamos a hablar de comida\./.test(D().querySelector('#word-panel .ctx-tr')?.textContent || ''), 'panel translates the exact sentence: ' + D().querySelector('#word-panel .ctx-tr')?.textContent);
+  await until(() => /^Today/.test(D().querySelector('#word-panel .ctx-tr')?.textContent || ''));
+  ok(/^Today we're going to talk about food\./.test(D().querySelector('#word-panel .ctx-tr')?.textContent || ''), 'panel translates the exact sentence: ' + D().querySelector('#word-panel .ctx-tr')?.textContent);
+  await until(() => D().querySelector('#word-panel .meaning-here'));
+  ok(/food/.test(D().querySelector('#word-panel .meaning-here')?.textContent || ''), '"Meaning here" picks the dictionary sense that fits the sentence (food, not meal)');
+  ok(D().querySelector('#word-panel .ctx-tr mark')?.textContent === 'food', 'the matching word is highlighted in the translation');
+  await until(() => /de comida/.test(D().querySelector('#word-panel #dict-area')?.textContent || ''));
+  ok(/Expression\s*de comida/.test(D().querySelector('#word-panel #dict-area').textContent.replace(/\s+/g, ' ')), 'an expression around the word is detected');
   D().querySelector('#reader .tr-btn[data-tr="2"]').click();
   await until(() => /^\[EN\] La comida/.test(D().querySelector('#reader p[data-i="2"] .tr')?.textContent || ''));
   ok(/^\[EN\] La comida/.test(D().querySelector('#reader p[data-i="2"] .tr')?.textContent || ''), 'line translation button shows the line in English');

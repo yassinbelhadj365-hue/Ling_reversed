@@ -231,6 +231,14 @@ body.listen-mode main { max-width: 1200px; }
 .defs li:hover { border-color: var(--accent); }
 .defs li .pos { font-size: .75rem; color: var(--text-2); display: block; }
 .ctx { font-style: italic; color: var(--text-2); font-size: .9rem; }
+.dict-line {
+  display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; align-items: center;
+  padding: 8px 10px; margin: 8px 0; border: 1px solid var(--border); border-radius: 10px; font-size: .92rem;
+}
+.dict-line > .small { grid-column: 1 / -1; }
+.meaning-here { border-color: var(--accent); }
+.defs li.fits { border-color: var(--accent); }
+.ctx-tr mark { background: transparent; color: inherit; font-weight: 700; text-decoration: underline 2px var(--accent); }
 .ctx-block { margin: 12px 0 4px; padding: 10px 12px; border-radius: 10px; background: var(--surface-2); }
 .ctx-block p { margin: 4px 0; }
 .ctx-sentence { font-size: 1rem; }

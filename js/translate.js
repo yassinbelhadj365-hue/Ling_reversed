@@ -4,7 +4,7 @@
 // Results are cached in the `dict` store under `s|from|to|hash`.
 import * as db from './db.js';
 import { state } from './state.js';
-import { hash32 } from './text.js';
+import { hash32, tokenize } from './text.js';
 import { fetchJson } from './dict.js';
 
 const CACHE_DAYS = 60;
@@ -117,6 +117,36 @@ export const ERROR_TEXT = {
   quota: 'Today’s free translation limit is used up. Use the links below, or add an email in Settings to raise it.',
   unavailable: 'Translation unavailable right now (offline?). Use the links below.',
 };
+
+const EN_STOP = new Set(('the and for with that this from into are was were you your his her its our their not but one ' +
+  'out off all any some has have had also used form plural singular person present past tense who what which when where ' +
+  'than then them they she him something someone being').split(' '));
+
+// "Meaning here": rank dictionary candidates by whether they show up in the
+// sentence's translation (exact word = 2, shared stem = 1). Wiktionary glosses are
+// English, so they only take part when the translation is English too.
+// -> candidates sorted, each with {score, fits, match (the translated word it matched)}.
+export function rankByContext(defs, sentenceTr, native) {
+  const trWords = sentenceTr ? tokenize(sentenceTr, native).filter((t) => t.n).map((t) => t.n) : [];
+  const stop = native === 'en' ? EN_STOP : new Set();
+  const scored = defs.map((d, k) => {
+    let best = 0;
+    let match = null;
+    const eligible = !d.formOf && (d.source !== 'Wiktionary' || native === 'en');
+    if (eligible) {
+      const words = tokenize(d.text, native).filter((t) => t.n && t.n.length >= 3 && !stop.has(t.n)).map((t) => t.n);
+      for (const w of words) {
+        for (const tw of trWords) {
+          const n = Math.max(4, Math.min(w.length, tw.length) - 2);
+          const s = tw === w ? 2 : w.length >= 4 && tw.length >= 4 && w.slice(0, n) === tw.slice(0, n) ? 1 : 0;
+          if (s > best) { best = s; match = tw; }
+        }
+      }
+    }
+    return { ...d, score: best, fits: best > 0, match, k };
+  });
+  return scored.sort((a, b) => b.score - a.score || a.k - b.k);
+}
 
 export function sentenceLinks(sentence, from, to) {
   const q = encodeURIComponent(sentence);

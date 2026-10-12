@@ -1,10 +1,11 @@
 // The word/phrase panel: status buttons, your hint, dictionary results.
 // Side sheet on desktop, bottom sheet on phones.
 import { state, lang, getWord, setStatus, saveWord, undoAuto, speak, esc } from './state.js';
-import { lookup, externalLinks } from './dict.js';
+import { lookup, lookupExpression, externalLinks } from './dict.js';
 import { NEW, KNOWN, IGNORED, isLearning } from './srs.js';
 import { progress } from './knowledge.js';
-import { translateSentence, sentenceLinks, ERROR_TEXT } from './translate.js';
+import { translateSentence, rankByContext, sentenceLinks, ERROR_TEXT } from './translate.js';
+import { expressionCandidates } from './text.js';
 
 const UNDO_WINDOW = 10 * 60 * 1000;
 
@@ -15,12 +16,31 @@ let current = null;
 const STATUS_LABEL = { [NEW]: 'New word', 1: 'LingQ · level 1', 2: 'LingQ · level 2', 3: 'LingQ · level 3', 4: 'LingQ · level 4', [KNOWN]: 'Known', [IGNORED]: 'Ignored' };
 
 export function openPanel(term, { context = '', mark = null, onChange, onClose } = {}) {
-  current = { term, context, mark, onChange, onClose, defs: null, tr: null };
+  current = { term, context, mark, onChange, onClose, defs: null, tr: null, expr: null, list: [] };
   render();
   panel.hidden = false;
   rememberContext();
   loadDefs(term);
   loadSentence(term, context);
+  loadExpression(term, context, mark);
+}
+
+// Re-render the parts that fill in asynchronously (translation, dictionary, expression).
+function refreshDynamic() {
+  const tr = panel.querySelector('#ctx-tr');
+  if (tr) tr.outerHTML = trHtml();
+  const area = panel.querySelector('#dict-area');
+  if (area) area.innerHTML = dictAreaHtml();
+}
+
+async function loadExpression(term, context, mark) {
+  if (!context || !mark || term.includes(' ')) return;
+  const cands = expressionCandidates(context, mark[0], lang());
+  const found = await Promise.all(cands.map((c) => lookupExpression(c.surface, lang()).catch(() => [])));
+  const k = found.findIndex((defs) => defs.length);
+  if (current?.term !== term || k === -1) return;
+  current.expr = { ...cands[k], defs: found[k] };
+  refreshDynamic();
 }
 
 // LingQs keep the sentence they were met in (and its translation) for flashcards.
@@ -38,8 +58,7 @@ async function loadSentence(term, context) {
   try { tr = await translateSentence(context, lang(), state.settings.native); } catch { tr = { error: 'unavailable' }; }
   if (current?.term !== term) return;
   current.tr = tr || { error: 'unavailable' };
-  const el = panel.querySelector('#ctx-tr');
-  if (el) el.outerHTML = trHtml();
+  refreshDynamic();
   rememberContext();
 }
 
@@ -63,7 +82,51 @@ function trHtml() {
   const tr = current.tr;
   if (!tr) return '<p class="ctx-tr muted" id="ctx-tr">Translating…</p>';
   if (tr.error) return `<p class="ctx-tr muted small" id="ctx-tr">${ERROR_TEXT[tr.error] || ERROR_TEXT.unavailable}</p>`;
-  return `<p class="ctx-tr" id="ctx-tr" dir="auto">${esc(tr.text)} <span class="badge">${esc(tr.source)}</span></p>`;
+  // Highlight the translated word that the "meaning here" matched.
+  const match = ranked().find((d) => d.fits)?.match;
+  let body = esc(tr.text);
+  if (match) {
+    const re = new RegExp(`(^|[^\\p{L}])(${match.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})(?=[^\\p{L}]|$)`, 'giu');
+    body = body.replace(re, '$1<mark>$2</mark>');
+  }
+  return `<p class="ctx-tr" id="ctx-tr" dir="auto">${body} <span class="badge">${esc(tr.source)}</span></p>`;
+}
+
+function ranked() {
+  return current.defs ? rankByContext(current.defs, current.tr?.text, state.settings.native) : [];
+}
+
+function dictAreaHtml() {
+  const { term, defs, expr } = current;
+  const list = ranked();
+  current.list = list;
+  const parts = [];
+  const form = list.find((d) => d.formOf);
+  if (form) {
+    const lemmaDef = list.find((d) => d.lemma === form.formOf);
+    parts.push(`<div class="dict-line"><span class="small muted">Form</span>
+      <div><i dir="auto">${esc(term)}</i> — ${esc(form.text)}${lemmaDef ? `<br><b dir="auto">${esc(form.formOf)}</b>: ${esc(lemmaDef.text)}` : ''}</div>
+      <button class="btn small" data-open="${esc(form.formOf)}">Open “${esc(form.formOf)}”</button></div>`);
+  }
+  const here = list.find((d) => d.fits);
+  if (here) {
+    parts.push(`<div class="dict-line meaning-here"><span class="small muted">Meaning here</span>
+      <div><b dir="auto">${esc(here.text)}</b> <span class="badge">fits this sentence</span></div>
+      <button class="btn small" data-def="${list.indexOf(here)}">Use as hint</button></div>`);
+  }
+  if (expr) {
+    parts.push(`<div class="dict-line"><span class="small muted">Expression</span>
+      <div><b dir="auto">${esc(expr.surface)}</b> — ${esc(expr.defs[0].text)}</div>
+      <button class="btn small" data-act="save-expr">Save as phrase</button></div>`);
+  }
+  let items;
+  if (!defs) items = '<li class="muted">Looking up…</li>';
+  else if (!list.length) items = '<li class="muted">No results (offline, or not in the dictionary). Try the links below.</li>';
+  else {
+    items = list.map((d, i) => `<li data-def="${i}" title="Use as my hint" class="${d.fits ? 'fits' : ''}">
+      <span class="pos">${esc(d.source)} · ${esc(d.pos || '')}${d.lemma ? ` · ${esc(d.lemma)}` : ''}${d.fits ? ' · fits this sentence' : ''}</span>${esc(d.text)}</li>`).join('');
+  }
+  return `${parts.join('')}<h3 class="small muted">Dictionary</h3><ul class="defs" id="defs">${items}</ul>`;
 }
 
 export function closePanel() {
@@ -113,8 +176,7 @@ function render() {
       <textarea id="hint" rows="2" style="min-height:64px" placeholder="Type a meaning, or tap one below">${esc(w?.hint || '')}</textarea>
     </div>
     ${related.length ? `<p class="small">In phrases: ${related.map((r) => `<button class="btn small" data-open="${esc(r.term)}">${esc(r.term)}</button>`).join(' ')}</p>` : ''}
-    <h3 class="small muted">Dictionary</h3>
-    <ul class="defs" id="defs">${defsHtml()}</ul>
+    <div id="dict-area">${dictAreaHtml()}</div>
     <p class="small">${externalLinks(term, lang(), state.settings.native)
       .map(([name, url]) => `<a href="${esc(url)}" target="_blank" rel="noopener">${name}</a>`).join(' · ')}</p>`;
 }
@@ -131,13 +193,6 @@ function autoLine(w) {
   return `<div class="auto-line"><span>${parts.join(' · ')}</span>${undo}</div>`;
 }
 
-function defsHtml() {
-  const defs = current.defs;
-  if (!defs) return '<li class="muted">Looking up…</li>';
-  if (!defs.length) return '<li class="muted">No results (offline, or not in the dictionary). Try the links below.</li>';
-  return defs.map((d, i) => `<li data-def="${i}" title="Use as my hint"><span class="pos">${esc(d.source)} · ${esc(d.pos || '')}</span>${esc(d.text)}</li>`).join('');
-}
-
 async function loadDefs(term) {
   let results = [];
   try {
@@ -145,8 +200,16 @@ async function loadDefs(term) {
   } catch { /* offline: the panel says so */ }
   if (current?.term !== term) return;
   current.defs = results;
-  const ul = panel.querySelector('#defs');
-  if (ul) ul.innerHTML = defsHtml();
+  refreshDynamic();
+}
+
+// Save the detected expression as a phrase LingQ (underlined in the reader).
+async function saveExpression() {
+  const { expr, context } = current;
+  const term = expr.terms.join(' ');
+  await setStatus(term, 1, { hint: expr.defs[0].text, context }, { manual: true });
+  current.onChange?.(term);
+  openPanel(term, { context, onChange: current.onChange, onClose: current.onClose });
 }
 
 async function changeStatus(status) {
@@ -188,9 +251,10 @@ panel.addEventListener('click', (e) => {
   if (t.dataset.act === 'close') return closePanel();
   if (t.dataset.act === 'speak') return speak(current.term);
   if (t.dataset.act === 'undo') return undo();
+  if (t.dataset.act === 'save-expr') return saveExpression();
   if (t.dataset.open) return openPanel(t.dataset.open, { context: current.context, onChange: current.onChange, onClose: current.onClose });
   if (t.dataset.s !== undefined) return changeStatus(Number(t.dataset.s));
-  if (t.dataset.def !== undefined) return saveHint(current.defs[Number(t.dataset.def)].text);
+  if (t.dataset.def !== undefined) return saveHint(current.list[Number(t.dataset.def)].text);
 });
 
 panel.addEventListener('change', (e) => {

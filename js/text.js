@@ -188,6 +188,30 @@ export function sentenceAt(text, offset) {
   return { sentence: text.trim(), start: lead };
 }
 
+// Candidate multi-word expressions around the word at `offset` in `sentence`:
+// runs of 3 and 2 adjacent words (separated only by spaces) that contain it,
+// longest first, at most 5. -> [{surface, terms}] (terms = normalized keys).
+export function expressionCandidates(sentence, offset, lang) {
+  const words = [];
+  let pos = 0;
+  for (const t of tokenize(sentence, lang)) {
+    if (t.n) words.push({ t: t.t, n: t.n, at: pos, gapBefore: words.length ? sentence.slice(words.at(-1).end, pos) : '' });
+    if (t.n) words.at(-1).end = pos + t.t.length;
+    pos += t.t.length;
+  }
+  const i = words.findIndex((w) => offset >= w.at && offset < w.end);
+  if (i === -1) return [];
+  const out = [];
+  for (const len of [3, 2]) {
+    for (let s = i - len + 1; s <= i; s++) {
+      const run = words.slice(Math.max(0, s), s + len);
+      if (s < 0 || run.length !== len || run.slice(1).some((w) => !/^\s+$/.test(w.gapBefore))) continue;
+      out.push({ surface: run.map((w) => w.t.toLocaleLowerCase()).join(' '), terms: run.map((w) => w.n) });
+    }
+  }
+  return out.slice(0, 5);
+}
+
 // FNV-1a: a short stable hash for cache keys.
 export function hash32(s) {
   let h = 0x811c9dc5;
