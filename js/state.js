@@ -3,6 +3,7 @@
 import * as db from './db.js';
 import { NEW, KNOWN, isLearning, freshSrs, grade } from './srs.js';
 import { onLookup, onPass, onManual, onReview, undoPatch } from './knowledge.js';
+import { countWords } from './text.js';
 
 export const LANGS = [
   ['es', 'Spanish'], ['fr', 'French'], ['de', 'German'], ['it', 'Italian'], ['pt', 'Portuguese'],
@@ -235,6 +236,43 @@ export async function removeLessonFromPool(lesson) {
     }
   }
   await db.putMany('words', changed);
+}
+
+// Replace the text of one lesson line (a transcript correction) and keep the
+// lesson's word counts and the word pool in step. Timing marks inside the line
+// no longer match the new text, so they are dropped; the line's start/end stay.
+export async function updateLessonLine(lesson, i, newText) {
+  const seg = lesson.segments[i];
+  const before = countWords([seg], lesson.lang).counts;
+  const after = countWords([{ text: newText }], lesson.lang).counts;
+  seg.text = newText;
+  delete seg.marks;
+  const changed = [];
+  for (const term of new Set([...Object.keys(before), ...Object.keys(after)])) {
+    const delta = (after[term] || 0) - (before[term] || 0);
+    if (!delta) continue;
+    const left = (lesson.words[term] || 0) + delta;
+    if (left > 0) lesson.words[term] = left; else delete lesson.words[term];
+    lesson.wordCount += delta;
+    let w = getWord(term);
+    if (!w && delta > 0) w = newWord(term);
+    if (!w) continue;
+    w.freq = Math.max(0, (w.freq || 0) + delta);
+    if (left > 0 && !w.lessons.includes(lesson.id)) w.lessons.push(lesson.id);
+    if (left <= 0) w.lessons = w.lessons.filter((id) => id !== lesson.id);
+    if (w.status === NEW && !w.lessons.length && !w.hint) {
+      state.vocab.delete(term);
+      await db.del('words', w.key);
+    } else {
+      w.updatedAt = Date.now();
+      state.vocab.set(term, w);
+      changed.push(w);
+    }
+  }
+  lesson.edited = (lesson.edited || 0) + 1;
+  lesson.updatedAt = Date.now();
+  await db.putMany('words', changed);
+  await db.put('lessons', lesson);
 }
 
 // ---------- activity (per day, per language) ----------

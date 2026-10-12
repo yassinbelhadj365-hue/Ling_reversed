@@ -395,6 +395,21 @@ try {
   const corre2 = await db.get('words', 'es|corre');
   ok(corre2?.status === 5, `second untapped listen: "corre" is known (status ${corre2?.status})`);
 
+  // ---- correcting a transcript line updates the lesson and the word pool ----
+  const videoId = W().location.hash.split('/').pop();
+  const before = await db.get('lessons', Number(videoId));
+  const largoBefore = before.words['largo'];
+  D().querySelector('#reader [data-edit="39"]').click();
+  const ta39 = await until(() => D().querySelector('#reader p[data-i="39"] textarea'));
+  ta39.value = 'Esta es la frase número 39 del vídeo corto.';
+  D().querySelector('#reader p[data-i="39"] [data-save]').click();
+  await until(() => D().querySelector('#reader p[data-i="39"] .w[data-n="corto"]'));
+  const after = await db.get('lessons', Number(videoId));
+  const corto = await db.get('words', 'es|corto');
+  ok(after.segments[39].text.endsWith('vídeo corto.') && after.words['corto'] === 1 && after.words['largo'] === largoBefore - 1,
+    'edited line saved and lesson word counts updated');
+  ok(corto?.freq === 1 && corto.lessons.includes(after.id) && corto.status === 0, 'a word introduced by the correction joins the pool as new');
+
   // ---- automatic transcript from just a YouTube link (server response stubbed) ----
   const realFetch = W().fetch;
   W().fetch = async (url, ...rest) => String(url).startsWith('api/transcript')

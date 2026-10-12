@@ -7,7 +7,7 @@
 //                 transcript that follows playback (docs/PLAN.md, C4).
 import * as db from '../db.js';
 import {
-  state, statusOf, setStatusMany, applyEvents, undoAuto, markSeen, bumpActivity, removeLessonFromPool,
+  state, statusOf, setStatusMany, applyEvents, undoAuto, markSeen, bumpActivity, removeLessonFromPool, updateLessonLine,
   saveSettings, speak, esc, toast, plural,
 } from '../state.js';
 import { tokenize, formatTime, sentenceAt } from '../text.js';
@@ -368,8 +368,10 @@ export async function renderReader(view, id) {
         o += t.t.length;
         return html;
       }).join('');
-      const tr = `<button class="tr-btn" data-tr="${i}" title="Translate this line" aria-label="Translate this line">⇄</button>`;
-      return `<p class="cue" data-i="${i}" dir="auto">${time}${words}${tr}</p>`;
+      const tools = `<span class="line-tools">
+        <button class="tr-btn" data-tr="${i}" title="Translate this line" aria-label="Translate this line">⇄</button>
+        <button class="tr-btn" data-edit="${i}" title="Correct this line" aria-label="Correct this line">✎</button></span>`;
+      return `<p class="cue" data-i="${i}" dir="auto">${time}${words}${tools}</p>`;
     }).join('') || '<p class="muted">This lesson is empty.</p>';
     markPhrases();
     if (!listen) {
@@ -461,6 +463,29 @@ export async function renderReader(view, id) {
     if (first && S.autoStatus) track(await applyEvents([{ term, type: 'lookup' }]));
   }
 
+  // Correct a transcript line in place; the lesson and word pool are updated.
+  function editLine(i) {
+    const p = reader.querySelector(`p[data-i="${i}"]`);
+    if (!p || p.querySelector('.line-edit')) return;
+    closePanel();
+    if (listen && player?.isPlaying()) player.pause();
+    p.innerHTML = `<span class="line-edit">
+      <textarea class="line-edit-text" dir="auto" rows="2">${esc(lesson.segments[i].text)}</textarea>
+      <span class="row"><button class="btn small primary" data-save>Save</button><button class="btn small" data-cancel>Cancel</button></span></span>`;
+    const ta = p.querySelector('textarea');
+    ta.focus();
+    const rerender = () => { const y = scrollY; renderPage(); scrollTo(0, y); };
+    p.querySelector('[data-cancel]').addEventListener('click', rerender);
+    p.querySelector('[data-save]').addEventListener('click', async () => {
+      const text = ta.value.replace(/\s+/g, ' ').trim();
+      if (text && text !== lesson.segments[i].text) {
+        await updateLessonLine(lesson, i, text);
+        toast('Line corrected');
+      }
+      rerender();
+    });
+  }
+
   // Line translations: hidden by default (reading the original is the point), one tap away.
   async function toggleLineTr(i, { open = false, auto = false } = {}) {
     const p = reader.querySelector(`p[data-i="${i}"]`);
@@ -477,7 +502,10 @@ export async function renderReader(view, id) {
   reader.addEventListener('click', async (e) => {
     const cue = e.target.closest('.cue-time');
     if (cue) { seekTo?.(Number(cue.dataset.t)); return; }
-    const trBtn = e.target.closest('.tr-btn');
+    const editBtn = e.target.closest('[data-edit]');
+    if (editBtn) { editLine(Number(editBtn.dataset.edit)); return; }
+    if (e.target.closest('.line-edit')) return;
+    const trBtn = e.target.closest('[data-tr]');
     if (trBtn) { toggleLineTr(Number(trBtn.dataset.tr)); return; }
     const span = e.target.closest('.w');
     if (!span) return;
