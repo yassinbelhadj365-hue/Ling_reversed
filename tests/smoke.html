@@ -7,6 +7,30 @@
 import { tokenize, parseAny, mergeCues, youTubeId, parseSubtitles } from '../js/text.js';
 import { grade, freshSrs } from '../js/srs.js';
 import { onLookup, onPass, onManual, onReview, undoPatch, computeStatus } from '../js/knowledge.js';
+import { buildTimeline, activeIndex, charAt } from '../js/sync.js';
+
+// A scriptable stand-in for the YouTube/media player (js/player.js test hook).
+function makeFakePlayer() {
+  const fake = { t: 0, playing: false, seeks: [], media: null, handlers: {} };
+  const emit = (e, ...a) => (fake.handlers[e] || []).forEach((fn) => fn(...a));
+  fake.set = (t, playing = fake.playing) => { fake.t = t; if (playing !== fake.playing) { fake.playing = playing; emit('state', playing); } };
+  fake.factory = (box, media) => {
+    fake.media = media;
+    box.innerHTML = '<div class="fake-player" style="height:200px;background:#000"></div>';
+    return {
+      kind: 'fake',
+      getTime: () => fake.t,
+      isPlaying: () => fake.playing,
+      play: () => fake.set(fake.t, true),
+      pause: () => fake.set(fake.t, false),
+      seek: (t) => { fake.t = t; fake.seeks.push(t); },
+      setRate: () => {},
+      on: (e, fn) => { (fake.handlers[e] ||= []).push(fn); },
+      destroy: () => { fake.handlers = {}; },
+    };
+  };
+  return fake;
+}
 
 const log = [];
 let fails = 0;
@@ -66,6 +90,13 @@ try {
   ok(onReview(r, 'again', { status: 1, srs: { interval: 0 } }).status === 1, 'auto: review again → level 1');
   ok(computeStatus({ look: 0, base: 0, pre: 1 }) === 0, 'auto: computeStatus pre < threshold stays new');
 
+  // ---- unit: timeline (sync.js) ----
+  const tl = buildTimeline([{ text: 'a b', start: 0 }, { text: 'c d', start: 4 }, { text: 'e f', start: 9 }]);
+  ok(tl.map((x) => x.end).join() === '4,9,21', 'timeline: ends from next start, last capped');
+  ok(activeIndex(tl, 4).idx === 1 && activeIndex(tl, -1).idx === -1 && activeIndex(tl, 30).inGap, 'timeline: active line, before start, gap');
+  const seg = { text: 'aaaa bbbb', marks: [[0, 0], [5, 2]] };
+  ok(charAt(seg, { start: 0, end: 4 }, 1) === 3 && charAt(seg, { start: 0, end: 4 }, 3) === 7, 'timeline: charAt interpolates between marks');
+
   // ---- e2e through the real app ----
   const frame = document.getElementById('app');
   const W = () => frame.contentWindow;
@@ -87,6 +118,8 @@ try {
   ta.dispatchEvent(new Event('input'));
   await until(() => D().getElementById('preview').textContent);
   ok(/Timed transcript/.test(D().getElementById('preview').textContent), 'import preview: ' + D().getElementById('preview').textContent);
+  const fake = makeFakePlayer();
+  W().__lingoFakePlayer = fake.factory;
   D().getElementById('go').click();
   await until(() => W().location.hash.startsWith('#/lesson/'));
   ok(W().location.hash.startsWith('#/lesson/'), 'navigated to lesson');
@@ -94,8 +127,15 @@ try {
   const spans = [...D().querySelectorAll('#reader .w')];
   ok(spans.length === 18, `reader rendered ${spans.length} word spans`);
   ok(spans.every((s) => s.classList.contains('st-0')), 'all words start blue (new)');
-  ok(D().querySelector('#media iframe')?.src.includes('dQw4w9WgXcQ'), 'YouTube embedded');
+  ok(fake.media?.youtubeId === 'dQw4w9WgXcQ', 'player created for the YouTube video');
   ok(D().querySelectorAll('.cue-time').length >= 1, 'timestamp buttons shown');
+  fake.set(5, true);
+  await until(() => D().querySelector('#reader p.playing'));
+  ok(D().querySelector('#reader p.playing')?.dataset.i === '1', 'video at 0:05 highlights the line starting at 0:04');
+  fake.set(5, false);
+  D().querySelector('.cue-time[data-t="9"]').click();
+  ok(fake.seeks.at(-1) === 9 && fake.playing, 'timestamp button seeks the player and plays');
+  fake.set(9, false);
 
   // click a word, make it LingQ level 2
   const comida = spans.find((s) => s.dataset.n === 'comida');

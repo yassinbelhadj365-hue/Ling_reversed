@@ -37,7 +37,12 @@ The machine has no Node, Python, or git — tooling is PowerShell + Edge.
 
 **Lessons** store parsed `segments[{text, start?}]` (`start` in seconds when timed) plus a precomputed `words{term: count}`. `parseAny` auto-detects SRT/VTT (dropping YouTube's rolling-caption duplicates), "0:12"-style pasted YouTube transcripts, or plain text; `mergeCues` joins short cues into sentence-sized chunks, keeping the first timestamp. The reader paginates at render time by `settings.pageSize` words. Turning a page forward (`finishPage`) marks untapped blue words known when `settings.pagingKnown` is on.
 
-**Media sync:** YouTube is controlled through raw `postMessage` to an `enablejsapi=1` iframe (no IFrame API script); current time comes back via `infoDelivery` messages. Local audio/video blobs live in the `media` store, keyed by `lessonId`, and are excluded from backups.
+**Media sync:** `js/player.js` `createPlayer()` gives the YouTube player and local `<audio>`/`<video>` one interface (`getTime/isPlaying/play/pause/seek/on('state'|'ended')`).
+- YouTube uses the official IFrame API, polled every 250 ms and interpolated with `performance.now()`. If the API script hasn't loaded within 5 s, it falls back to raw `postMessage`.
+- `js/sync.js` (pure) turns segments into a timeline (`buildTimeline`, `activeIndex`, `charAt`).
+- Tests set `window.__lingoFakePlayer` (see `makeFakePlayer` in `tests/smoke.html`) to drive playback without YouTube.
+
+Local audio/video blobs live in the `media` store, keyed by `lessonId`, and are excluded from backups.
 
 **IndexedDB schema** is in `js/db.js` (`DB_VERSION` 1; stores: lessons, media, words, dict, activity, kv). Schema changes require bumping `DB_VERSION` and handling them in `onupgradeneeded`. `words` and `activity` keys are `"<lang>|<term>"` and `"<YYYY-MM-DD>|<lang>"`.
 

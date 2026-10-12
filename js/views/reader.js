@@ -7,6 +7,8 @@ import {
 import { tokenize, formatTime, sentenceAround } from '../text.js';
 import { NEW, KNOWN, isLearning } from '../srs.js';
 import { openPanel, closePanel, panelTerm } from '../panel.js';
+import { createPlayer } from '../player.js';
+import { buildTimeline, activeIndex } from '../sync.js';
 
 function paginate(segments, pageSize, lang) {
   const pages = [];
@@ -73,48 +75,35 @@ export async function renderReader(view, id) {
   const reader = view.querySelector('#reader');
 
   // ---------- media ----------
-  let seek = null;
   const mediaBox = view.querySelector('#media');
-  if (lesson.youtubeId) {
-    const origin = encodeURIComponent(location.origin);
-    mediaBox.innerHTML = `<iframe id="yt" allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen
-      src="https://www.youtube.com/embed/${esc(lesson.youtubeId)}?enablejsapi=1&playsinline=1&rel=0&origin=${origin}"></iframe>`;
-    const frame = mediaBox.querySelector('iframe');
-    const post = (msg) => frame.contentWindow?.postMessage(JSON.stringify(msg), '*');
-    frame.addEventListener('load', () => post({ event: 'listening', id: 'lingo', channel: 'widget' }));
-    seek = (t) => {
-      post({ event: 'command', func: 'seekTo', args: [t, true] });
-      post({ event: 'command', func: 'playVideo', args: [] });
-    };
-    const onMsg = (e) => {
-      try {
-        if (!/youtube(-nocookie)?\.com$/.test(new URL(e.origin).hostname)) return;
-        const data = typeof e.data === 'string' ? JSON.parse(e.data) : e.data;
-        if (data?.info?.currentTime != null) highlightTime(data.info.currentTime);
-      } catch { /* not a player message */ }
-    };
-    window.addEventListener('message', onMsg);
-    cleanups.push(() => window.removeEventListener('message', onMsg));
-  } else if (media?.blob) {
-    const url = URL.createObjectURL(media.blob);
-    const isVideo = (media.type || '').startsWith('video');
-    mediaBox.innerHTML = isVideo ? `<video controls playsinline src="${url}"></video>` : `<audio controls src="${url}"></audio>`;
-    const el = mediaBox.firstElementChild;
-    el.addEventListener('timeupdate', () => highlightTime(el.currentTime));
-    seek = (t) => { el.currentTime = t; el.play(); };
-    cleanups.push(() => { el.pause(); URL.revokeObjectURL(url); });
-  }
+  const player = createPlayer(mediaBox, { youtubeId: lesson.youtubeId, blob: media?.blob, type: media?.type });
+  const seek = player ? (t) => { player.seek(t); player.play(); } : null;
+  const timeline = buildTimeline(lesson.segments);
+  let activeIdx = -1;
+  let raf = 0;
 
   function highlightTime(t) {
-    let idx = -1;
-    lesson.segments.forEach((s, i) => { if (s.start != null && s.start <= t + 0.25) idx = i; });
-    reader.querySelectorAll('p.playing').forEach((p) => { if (Number(p.dataset.i) !== idx) p.classList.remove('playing'); });
+    const { idx } = activeIndex(timeline, t);
+    if (idx === activeIdx) return;
+    activeIdx = idx;
+    reader.querySelectorAll('p.playing').forEach((p) => p.classList.remove('playing'));
     reader.querySelector(`p[data-i="${idx}"]`)?.classList.add('playing');
+  }
+
+  function tick() {
+    highlightTime(player.getTime());
+    raf = player.isPlaying() && !document.hidden ? requestAnimationFrame(tick) : 0;
+  }
+
+  if (player) {
+    player.on('state', (playing) => { if (playing && !raf) raf = requestAnimationFrame(tick); else if (!playing) tick(); });
+    cleanups.push(() => { cancelAnimationFrame(raf); player.destroy(); });
   }
 
   // ---------- rendering ----------
   function renderPage() {
     clicked = new Set();
+    activeIdx = -1;
     reader.innerHTML = pages[page].map((i) => {
       const seg = lesson.segments[i];
       const time = timed && seek && seg.start != null
