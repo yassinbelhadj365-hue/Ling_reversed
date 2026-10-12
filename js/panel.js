@@ -1,11 +1,12 @@
 // The word/phrase panel: status buttons, your hint, dictionary results.
 // Side sheet on desktop, bottom sheet on phones.
-import { state, lang, langName, getWord, setStatus, saveWord, undoAuto, speak, esc } from './state.js';
+import { state, lang, langName, getWord, setStatus, saveWord, undoAuto, speak, esc, toast } from './state.js';
 import { lookup, lookupExpression, externalLinks } from './dict.js';
 import { NEW, KNOWN, IGNORED, isLearning } from './srs.js';
 import { progress } from './knowledge.js';
 import { translateSentence, rankByContext, sentenceLinks, ERROR_TEXT, aiStatus, explainInContext } from './translate.js';
 import { expressionCandidates } from './text.js';
+import { askStronger, openChatGpt, openDeepSeek } from './assist.js';
 
 const UNDO_WINDOW = 10 * 60 * 1000;
 
@@ -17,7 +18,7 @@ const STATUS_LABEL = { [NEW]: 'New word', 1: 'LingQ · level 1', 2: 'LingQ · le
 
 // around: {prev, next} neighbouring lines, extra context for the AI explanation.
 export function openPanel(term, { context = '', mark = null, around = {}, onChange, onClose } = {}) {
-  current = { term, context, mark, around, onChange, onClose, defs: null, tr: null, expr: null, list: [], ai: null };
+  current = { term, context, mark, around, onChange, onClose, defs: null, tr: null, expr: null, list: [], ai: null, assist: null };
   render();
   panel.hidden = false;
   rememberContext();
@@ -81,6 +82,60 @@ function aiHtml() {
 function renderAI() {
   const el = panel.querySelector('#ai-area');
   if (el) el.innerHTML = aiHtml();
+}
+
+// ---------- "Still unclear?": stronger model via OpenRouter, then ChatGPT ----------
+function assistInput() {
+  return { term: current.term, sentence: current.context, prev: current.around.prev, next: current.around.next };
+}
+
+async function askStrongerAI() {
+  const term = current.term;
+  current.assist = { state: 'loading' };
+  renderAssist();
+  try {
+    const { result, model } = await askStronger(assistInput());
+    if (current?.term !== term) return;
+    current.assist = { state: 'done', result, model };
+  } catch (err) {
+    if (current?.term !== term) return;
+    current.assist = { state: 'error', msg: err.message };
+  }
+  renderAssist();
+}
+
+function assistHtml() {
+  if (!current.context) return '';
+  const a = current.assist;
+  const model = state.settings.assistModel?.split('/').pop().replace(/:free$/, ' (free)') || 'a stronger model';
+  let body = '';
+  if (a?.state === 'loading') body = `<div class="small muted">Asking ${esc(model)}…</div>`;
+  else if (a?.state === 'error') body = `<div class="small">${esc(a.msg)}</div>`;
+  else if (a?.state === 'done') {
+    const r = a.result;
+    body = `<div><b dir="auto">${esc(r.gloss_in_context || '')}</b>
+      <div class="small muted">${esc([r.part_of_speech, r.lemma && r.lemma !== current.term ? `from ${r.lemma}` : ''].filter(Boolean).join(' · '))}</div>
+      ${r.grammar_note ? `<div class="small">${esc(r.grammar_note)}</div>` : ''}
+      ${r.multiword_unit ? `<div class="small">Part of the expression <b dir="auto">${esc(r.multiword_unit)}</b></div>` : ''}
+      ${r.explanation ? `<p class="small" style="margin:6px 0">${esc(r.explanation)}</p>` : ''}
+      ${r.example ? `<div class="small ctx" dir="auto">${esc(typeof r.example === 'string' ? r.example : Object.values(r.example).join(' — '))}</div>` : ''}
+      <div class="small muted">Answer from ${esc(a.model)}</div></div>
+      <button class="btn small" data-act="assist-hint">Use as hint</button>`;
+  }
+  return `<details class="assist" ${a ? 'open' : ''}>
+      <summary class="small"><b>Still unclear?</b> Ask a stronger AI</summary>
+      <div class="row" style="margin:8px 0">
+        <button class="btn small" data-act="assist" title="Free model through your free OpenRouter key">Ask ${esc(model)}</button>
+        <button class="btn small" data-act="deepseek" title="Opens DeepSeek’s free chat; the question is copied for you to paste">Ask DeepSeek ↗</button>
+        <button class="btn small" data-act="chatgpt" title="Opens ChatGPT with the question written for you (uses your own ChatGPT account)">Ask ChatGPT ↗</button>
+      </div>
+      ${body ? `<div class="dict-line">${body}</div>` : ''}
+    </details>`;
+}
+
+function renderAssist() {
+  const el = panel.querySelector('#assist-area');
+  if (el) el.innerHTML = assistHtml();
 }
 
 // Re-render the parts that fill in asynchronously (translation, dictionary, expression).
@@ -230,6 +285,7 @@ function render() {
     </div>
     ${sentenceHtml()}
     <div id="ai-area">${aiHtml()}</div>
+    <div id="assist-area">${assistHtml()}</div>
     <div class="field" style="margin-top:12px">
       <label for="hint">Your meaning / hint</label>
       <textarea id="hint" rows="2" style="min-height:64px" placeholder="Type a meaning, or tap one below">${esc(w?.hint || '')}</textarea>
@@ -313,6 +369,17 @@ panel.addEventListener('click', (e) => {
   if (t.dataset.act === 'save-expr') return saveExpression();
   if (t.dataset.act === 'ai-run') return loadAI(current.term, { auto: true, download: true });
   if (t.dataset.act === 'ai-hint') return saveHint(current.ai.result.gloss_in_context);
+  if (t.dataset.act === 'assist') return askStrongerAI();
+  if (t.dataset.act === 'assist-hint') return saveHint(current.assist.result.gloss_in_context);
+  if (t.dataset.act === 'chatgpt') {
+    return openChatGpt(assistInput()).then((copied) => copied &&
+      toast('Opened ChatGPT with your question. If the box is empty, paste it (Ctrl+V).', 5000));
+  }
+  if (t.dataset.act === 'deepseek') {
+    return openDeepSeek(assistInput()).then((copied) => toast(copied
+      ? 'Question copied. Paste it into DeepSeek (Ctrl+V or long-press → Paste).'
+      : 'Opened DeepSeek. Copying was blocked, so type your question there.', 6000));
+  }
   if (t.dataset.open) return openPanel(t.dataset.open, { context: current.context, onChange: current.onChange, onClose: current.onClose });
   if (t.dataset.s !== undefined) return changeStatus(Number(t.dataset.s));
   if (t.dataset.def !== undefined) return saveHint(current.list[Number(t.dataset.def)].text);

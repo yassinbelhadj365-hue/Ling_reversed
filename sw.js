@@ -3,7 +3,7 @@
 const CACHE = 'lingo-reader-v2';
 const SHELL = [
   './', './index.html', './styles.css', './manifest.webmanifest', './icon.svg',
-  './js/app.js', './js/db.js', './js/text.js', './js/dict.js', './js/srs.js', './js/state.js', './js/panel.js', './js/knowledge.js', './js/sync.js', './js/player.js', './js/translate.js',
+  './js/app.js', './js/db.js', './js/text.js', './js/dict.js', './js/srs.js', './js/state.js', './js/panel.js', './js/knowledge.js', './js/sync.js', './js/player.js', './js/translate.js', './js/assist.js',
   './js/views/library.js', './js/views/import.js', './js/views/reader.js', './js/views/review.js',
   './js/views/vocab.js', './js/views/stats.js', './js/views/settings.js',
 ];

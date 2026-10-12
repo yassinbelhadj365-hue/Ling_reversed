@@ -1,6 +1,7 @@
 import * as db from '../db.js';
 import { state, LANGS, lang, saveSettings, loadSettings, loadVocab, toast, download, esc } from '../state.js';
 import { onDeviceStatus, installOnDevice, aiStatus } from '../translate.js';
+import { getKey, setKey, listModels, askStronger } from '../assist.js';
 
 const langOptions = (selected) =>
   LANGS.map(([code, name]) => `<option value="${code}" ${code === selected ? 'selected' : ''}>${name}</option>`).join('');
@@ -82,6 +83,23 @@ export async function renderSettings(view) {
     </div>
 
     <div class="card">
+      <h2 style="margin-top:0">“Still unclear?” — stronger AI help (free)</h2>
+      <p class="small muted">When a word still doesn’t make sense, the word panel can ask a stronger AI. Nothing here costs money:</p>
+      <ul class="small">
+        <li><b>Ask DeepSeek ↗</b> and <b>Ask ChatGPT ↗</b> open their websites with your question ready (ChatGPT uses your own subscription). No setup.</li>
+        <li><b>Ask in the app</b> uses a free model on OpenRouter. Create a free account at
+          <a href="https://openrouter.ai/keys" target="_blank" rel="noopener">openrouter.ai/keys</a> (no card needed), create a key and paste it here.
+          Free models have daily limits, and only free models are offered.</li>
+      </ul>
+      <div class="field"><label for="or-key">OpenRouter key</label>
+        <input id="or-key" type="password" autocomplete="off" placeholder="sk-or-…">
+        <span class="small muted">Stored only in this browser, never included in backups, and sent only to openrouter.ai.</span></div>
+      <div class="field"><label for="or-model">Free model</label>
+        <select id="or-model"><option value="">Loading free models…</option></select></div>
+      <div class="row"><button class="btn small" id="or-test">Test</button><span id="or-status" class="small muted"></span></div>
+    </div>
+
+    <div class="card">
       <h2 style="margin-top:0">Text to speech</h2>
       <div class="field"><label for="voice">Voice</label><select id="voice"></select></div>
       <div class="field"><label for="ttsRate">Speed: <span id="rateVal">${s.ttsRate}</span>×</label>
@@ -149,6 +167,27 @@ export async function renderSettings(view) {
     showOnDevice();
   });
   showOnDevice();
+
+  // ---- OpenRouter (free models only) ----
+  getKey().then((k) => { $('#or-key').value = k; });
+  $('#or-key').addEventListener('change', (e) => setKey(e.target.value).then(() => toast('Key saved')));
+  listModels().then((models) => {
+    const current = state.settings.assistModel;
+    $('#or-model').innerHTML = models.length
+      ? models.map((m, i) => `<option value="${esc(m.id)}" ${(current ? m.id === current : i === 0) ? 'selected' : ''}>${esc(m.name)}</option>`).join('')
+      : '<option value="">No free models available right now</option>';
+  }).catch(() => { $('#or-model').innerHTML = '<option value="">Couldn’t load the model list (offline?)</option>'; });
+  $('#or-model').addEventListener('change', (e) => saveSettings({ assistModel: e.target.value }).then(() => toast('Saved')));
+  $('#or-test').addEventListener('click', async () => {
+    $('#or-status').textContent = 'Asking…';
+    try {
+      const { result, model } = await askStronger({ term: 'casa', sentence: 'Mi casa es tu casa.', prev: '', next: '' });
+      $('#or-status').textContent = `✓ Works (${model}): “${result.gloss_in_context}”`;
+    } catch (err) {
+      $('#or-status').textContent = err.message;
+    }
+  });
+
   aiStatus().then((st) => {
     $('#ai-status').textContent = {
       available: 'Ready ✓', downloadable: 'Available — downloads the first time you tap Explain',

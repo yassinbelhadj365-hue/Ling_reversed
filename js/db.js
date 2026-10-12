@@ -85,6 +85,7 @@ export async function setSetting(key, value) { return put('kv', { key, value });
 export async function exportAll() {
   const out = {};
   for (const name of ['lessons', 'words', 'activity', 'kv']) out[name] = await all(name);
+  out.kv = out.kv.filter((row) => !row.key.startsWith('secret:')); // API keys never leave this browser
   return { app: 'lingo-reader', version: 1, exportedAt: new Date().toISOString(), data: out };
 }
 export async function importAll(backup) {

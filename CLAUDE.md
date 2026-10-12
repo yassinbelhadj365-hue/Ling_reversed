@@ -65,7 +65,11 @@ Local audio/video blobs live in the `media` store, keyed by `lessonId`, and are 
 - `rankByContext` picks the dictionary sense that appears in the sentence translation ("Meaning here").
 - `dict.js` `parseDefinition` reads Wiktionary form-of links (inflection → lemma). `lookupExpression` checks 2–3-word runs from `text.expressionCandidates`.
 - `explainInContext` uses Chrome's on-device Prompt API (`LanguageModel`, Gemini Nano) when available. It is feature-detected and absent in Edge and on phones.
-- Tests stub these with `window.__lingoTranslate`, `__lingoDict`, `__lingoExpr` and `__lingoAI`.
+- `js/assist.js` handles "Still unclear?" escalation.
+  - In the app: OpenRouter **free models only**. `listModels` filters to `:free` models with zero price, and `askStronger` refuses non-free IDs. The user doesn't want to spend money, so never add paid models.
+  - In the browser: DeepSeek's free web chat (the question is copied) and ChatGPT (`chatgpt.com/?q=`, the user's subscription).
+  - The key lives in kv `secret:openrouter`. `db.exportAll` drops `secret:*` rows.
+- Tests stub these with `window.__lingoTranslate`, `__lingoDict`, `__lingoExpr`, `__lingoAI` and `__lingoAssist`.
 
 **IndexedDB schema** is in `js/db.js` (`DB_VERSION` 1; stores: lessons, media, words, dict, activity, kv). Schema changes require bumping `DB_VERSION` and handling them in `onupgradeneeded`. `words` and `activity` keys are `"<lang>|<term>"` and `"<YYYY-MM-DD>|<lang>"`.
 

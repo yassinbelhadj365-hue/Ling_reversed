@@ -12,6 +12,7 @@ import { grade, freshSrs } from '../js/srs.js';
 import { onLookup, onPass, onManual, onReview, undoPatch, computeStatus } from '../js/knowledge.js';
 import { buildTimeline, activeIndex, charAt } from '../js/sync.js';
 import * as db from '../js/db.js';
+import { parseJsonReply, listModels } from '../js/assist.js';
 
 // A scriptable stand-in for the YouTube/media player (js/player.js test hook).
 function makeFakePlayer() {
@@ -129,6 +130,21 @@ try {
   ok(fd.formOf === 'hablar' && /plural of hablar/.test(fd.text), 'parseDefinition: inflected form → lemma');
   const ec = expressionCandidates('Lo hizo a pesar de todo.', 'Lo hizo a pesar de todo.'.indexOf('pesar'), 'es');
   ok(ec[0].surface === 'hizo a pesar' && ec.some((c) => c.surface === 'a pesar de') && ec.length === 5, 'expressionCandidates: 3- and 2-word runs around the word');
+
+  // ---- unit: "still unclear" helpers ----
+  ok(parseJsonReply('<think>hmm {no}</think>Sure!\n```json\n{"gloss_in_context":"here"}\n```').gloss_in_context === 'here', 'parseJsonReply: strips reasoning and fences');
+  const realFetchU = window.fetch;
+  window.fetch = async () => new Response(JSON.stringify({ data: [
+    { id: 'deepseek/deepseek-v4-pro', pricing: { prompt: '0.0000006', completion: '0.000002' } },
+    { id: 'google/gemma-4-31b-it:free', pricing: { prompt: '0', completion: '0' } },
+    { id: 'nvidia/nemotron-3-ultra-550b-a55b:free', pricing: { prompt: '0', completion: '0' } },
+  ] }));
+  const models = await listModels();
+  window.fetch = realFetchU;
+  ok(models.map((m) => m.id).join() === 'nvidia/nemotron-3-ultra-550b-a55b:free,google/gemma-4-31b-it:free', 'only free models are offered (paid DeepSeek excluded), strongest first');
+  await db.setSetting('secret:test', 'sk-123');
+  ok(!(await db.exportAll()).data.kv.some((r) => r.key.startsWith('secret:')), 'backups never contain API keys');
+  await db.del('kv', 'secret:test');
 
   // ---- unit: timeline (sync.js) ----
   const tl = buildTimeline([{ text: 'a b', start: 0 }, { text: 'c d', start: 4 }, { text: 'e f', start: 9 }]);
@@ -319,6 +335,25 @@ try {
   await until(() => /pointing at the sentence/.test(D().querySelector('#ai-area')?.textContent || ''));
   ok(/Feminine singular/.test(D().querySelector('#ai-area')?.textContent || ''), 'on-device AI explanation shown with a grammar note');
   ok(aiInput?.sentence === lines[25] && aiInput.prev === lines[24] && aiInput.next === lines[26], 'AI gets the sentence plus the previous and next lines');
+
+  // "Still unclear?": stronger free model in the panel, DeepSeek / ChatGPT in the browser
+  W().__lingoAssist = async (input) => ({ model: 'test/free-model:free', result: {
+    gloss_in_context: 'this one', lemma: 'este', part_of_speech: 'determiner', grammar_note: 'Agrees with "frase".',
+    multiword_unit: null, explanation: 'Points at the sentence being spoken.', example: 'Esta casa es grande. — This house is big.' } });
+  const opened = [];
+  const realOpen = W().open;
+  W().open = (url) => { opened.push(url); return null; };
+  D().querySelector('#word-panel details.assist summary').click();
+  D().querySelector('#word-panel [data-act="assist"]').click();
+  await until(() => /Points at the sentence/.test(D().querySelector('#assist-area')?.textContent || ''));
+  ok(/test\/free-model:free/.test(D().querySelector('#assist-area').textContent), 'stronger free model answer shown in the panel');
+  D().querySelector('#word-panel [data-act="chatgpt"]').click();
+  D().querySelector('#word-panel [data-act="deepseek"]').click();
+  await until(() => opened.length === 2);
+  ok(opened[0].startsWith('https://chatgpt.com/?q=') && decodeURIComponent(opened[0]).includes(lines[25]), 'Ask ChatGPT opens chatgpt.com with the sentence in the question');
+  ok(opened[1] === 'https://chat.deepseek.com/', 'Ask DeepSeek opens DeepSeek’s free chat');
+  W().open = realOpen;
+  delete W().__lingoAssist;
   delete W().__lingoAI;
   D().querySelector('#word-panel [data-act="close"]').click();
   ok(fake.playing, 'closing the panel resumes it');

@@ -239,6 +239,8 @@ body.listen-mode main { max-width: 1200px; }
 .meaning-here { border-color: var(--accent); }
 .defs li.fits { border-color: var(--accent); }
 .ctx-tr mark { background: transparent; color: inherit; font-weight: 700; text-decoration: underline 2px var(--accent); }
+details.assist { margin: 10px 0; padding: 8px 10px; border: 1px dashed var(--border); border-radius: 10px; }
+details.assist summary { cursor: pointer; }
 .ctx-block { margin: 12px 0 4px; padding: 10px 12px; border-radius: 10px; background: var(--surface-2); }
 .ctx-block p { margin: 4px 0; }
 .ctx-sentence { font-size: 1rem; }

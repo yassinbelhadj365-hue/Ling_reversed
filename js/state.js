@@ -30,6 +30,7 @@ const DEFAULTS = {
   wordProgress: true,  // underline the words of the active line as they are spoken
   translateEmail: '',  // optional: sent to MyMemory to raise its free daily translation limit
   aiAuto: true,        // explain words automatically when Chrome's on-device AI is available
+  assistModel: '',     // OpenRouter model for "Still unclear?" (free models only; '' = best available)
   dailyGoal: 20,       // LingQs created per day
   ttsRate: 0.9,
   voice: '',
