@@ -433,6 +433,38 @@ try {
   ok(autoLesson.segments.length === 1 && autoLesson.segments[0].marks?.length === 5, 'auto-captions became one sentence with word timings');
   W().fetch = realFetch;
 
+  // ---- AI transcription from a YouTube link (audio download and Whisper stubbed) ----
+  const wav = (() => { // 1 s of silence, 16 kHz mono PCM
+    const n = 16000, b = new ArrayBuffer(44 + n * 2), v = new DataView(b);
+    const s = (o, t) => [...t].forEach((c, i) => v.setUint8(o + i, c.charCodeAt(0)));
+    s(0, 'RIFF'); v.setUint32(4, 36 + n * 2, true); s(8, 'WAVEfmt '); v.setUint32(16, 16, true); v.setUint16(20, 1, true);
+    v.setUint16(22, 1, true); v.setUint32(24, 16000, true); v.setUint32(28, 32000, true); v.setUint16(32, 2, true);
+    v.setUint16(34, 16, true); s(36, 'data'); v.setUint32(40, n * 2, true);
+    return b;
+  })();
+  W().fetch = async (url, ...rest) => String(url).startsWith('api/audio')
+    ? new Response(wav.slice(0), { headers: { 'content-type': 'audio/wav' } }) : realFetch(url, ...rest);
+  let asrLang = null;
+  W().__lingoASR = async (audio, { lang, onProgress }) => {
+    asrLang = lang;
+    onProgress({ stage: 'transcribe', done: 0, total: 1 });
+    return [{ start: 0, end: 2, text: 'Hola, esto es una prueba.' }, { start: 2, end: 4, text: 'La inteligencia artificial escribe.' }];
+  };
+  W().location.hash = '#/import';
+  await until(() => D().getElementById('ai-yt'));
+  D().getElementById('yt').value = 'https://youtu.be/dQw4w9WgXcQ';
+  D().getElementById('text').value = '';
+  D().getElementById('ai-yt').click();
+  await until(() => /Transcribed/.test(D().getElementById('yt-status').textContent));
+  ok(/✓ Transcribed 2 lines/.test(D().getElementById('yt-status').textContent) && asrLang === 'es', 'AI transcription fills the transcript: ' + D().getElementById('yt-status').textContent);
+  ok(/00:00:02\.000 --> 00:00:04\.000\nLa inteligencia artificial escribe\./.test(D().getElementById('text').value), 'AI transcript is timed (WebVTT)');
+  D().getElementById('go').click();
+  await until(() => V().classList.contains('listen') && /inteligencia/.test(D().getElementById('reader').textContent));
+  const asrLesson = await db.get('lessons', Number(W().location.hash.split('/').pop()));
+  ok(asrLesson.asr === true && asrLesson.segments.length === 2, 'lesson remembers it was transcribed by AI');
+  W().fetch = realFetch;
+  delete W().__lingoASR;
+
   ok(!D().body.dataset.error, 'no runtime errors: ' + (D().body.dataset.error || 'none'));
 } catch (e) {
   ok(false, 'exception: ' + e.stack);

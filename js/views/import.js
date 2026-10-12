@@ -1,6 +1,7 @@
 import * as db from '../db.js';
 import { state, lang, langName, statusOf, addLessonToPool, esc, toast, plural } from '../state.js';
 import { parseAny, mergeCues, countWords, htmlToText, youTubeId } from '../text.js';
+import { fetchYouTubeAudio, decodeAudio, transcribe, toVtt, progressText, AUDIO_ERRORS } from '../asr.js';
 import { NEW } from '../srs.js';
 
 function prepare(raw, filename, merge) {
@@ -27,6 +28,7 @@ export async function renderImport(view) {
         </div>
         <span class="small muted" id="yt-status" aria-live="polite">Paste a link and the transcript is fetched automatically.</span>
         <select id="yt-track" hidden aria-label="Caption track"></select>
+        <div class="row"><button class="btn small" id="ai-yt" type="button" title="Listen to the video's audio and write the transcript with AI (on this computer)">🎙 Transcribe the audio with AI instead</button></div>
       </div>
       <div class="field">
         <label for="title">Title</label>
@@ -45,6 +47,7 @@ export async function renderImport(view) {
         <label for="media">Audio or video file (optional)</label>
         <input id="media" type="file" accept="audio/*,video/*">
         <span class="small muted">Saved on this device and synced with the transcript’s timestamps.</span>
+        <div class="row"><button class="btn small" id="ai-file" type="button" hidden>🎙 Transcribe this file with AI</button></div>
       </div>
       <label class="row small"><input type="checkbox" id="merge" ${state.settings.mergeCues ? 'checked' : ''}>
         Merge short caption lines into sentences</label>
@@ -94,7 +97,7 @@ export async function renderImport(view) {
     if (!r.ok) {
       status({
         'no-track': `This video has no ${langName(lang())} captions. Pick another track below, or switch the app language at the top.`,
-        'no-captions': 'This video has no captions. Paste a transcript or upload subtitles instead.',
+        'no-captions': 'This video has no captions. Use “Transcribe the audio with AI” below, or paste a transcript.',
         'network': 'Couldn’t reach YouTube. Check your connection and try again.',
         'empty': 'YouTube returned empty captions for this track. Try another track.',
       }[r.error] || 'Couldn’t get the transcript.');
@@ -102,11 +105,53 @@ export async function renderImport(view) {
     }
     $('#text').value = r.vtt;
     $('#text').dispatchEvent(new Event('input'));
+    aiMade = false;
     if (!$('#title').value.trim() && r.title) $('#title').value = r.title;
     fetchedFor = id;
     status(`✓ Loaded “${trackLabel(r.track)}” captions.${r.track.kind === 'auto' ? ' Auto-generated captions may contain mistakes.' : ''}`);
     return true;
   }
+
+  // ---------- AI transcription (Whisper on this device) ----------
+  let aiMade = false; // the transcript in the box came from AI speech recognition
+  let busy = false;
+  async function aiTranscribe(getAudio) {
+    if (busy) return;
+    busy = true;
+    const btns = [$('#ai-yt'), $('#ai-file'), $('#go')];
+    btns.forEach((b) => { b.disabled = true; });
+    const show = (p) => status(progressText(p));
+    try {
+      show({ stage: 'audio' });
+      const raw = await getAudio();
+      show({ stage: 'decode' });
+      const audio = await decodeAudio(raw);
+      const cues = await transcribe(audio, { lang: lang(), onProgress: show });
+      if (!cues.length) throw new Error('empty');
+      $('#text').value = toVtt(cues);
+      $('#text').dispatchEvent(new Event('input'));
+      aiMade = true;
+      status(`✓ Transcribed ${plural(cues.length, 'line')} with AI. AI transcripts can contain mistakes — you can correct any line with ✎ in the lesson.`);
+    } catch (err) {
+      status(AUDIO_ERRORS[err.message] || (err.message === 'empty'
+        ? 'The AI didn’t hear any speech in this audio.'
+        : `AI transcription failed: ${err.message}`));
+    } finally {
+      busy = false;
+      btns.forEach((b) => { b.disabled = false; });
+    }
+  }
+  $('#ai-yt').addEventListener('click', () => {
+    const id = youTubeId($('#yt').value.trim());
+    if (!id) return status('Paste a YouTube link first.');
+    aiTranscribe(() => fetchYouTubeAudio(id));
+  });
+  $('#media').addEventListener('change', () => { $('#ai-file').hidden = !$('#media').files[0]; });
+  $('#ai-file').addEventListener('click', () => {
+    const f = $('#media').files[0];
+    if (f) aiTranscribe(() => f.arrayBuffer());
+  });
+  $('#text').addEventListener('input', (e) => { if (e.isTrusted) aiMade = false; });
 
   $('#yt-fetch').addEventListener('click', () => fetchTranscript());
   $('#yt-track').addEventListener('change', (e) => { if (e.target.value !== '') fetchTranscript(e.target.value); });
@@ -157,7 +202,7 @@ export async function renderImport(view) {
         const p = prepare(item.raw, item.filename, $('#merge').checked);
         if (!p.total) continue;
         const lesson = {
-          lang: lang(), title: item.title, kind: p.timed ? 'transcript' : 'text',
+          lang: lang(), title: item.title, kind: p.timed ? 'transcript' : 'text', asr: i === 0 && !item.filename && aiMade,
           source: i === 0 && ytUrl ? ytUrl : item.filename,
           youtubeId: i === 0 ? ytId : null,
           segments: p.segments, words: p.counts, wordCount: p.total,

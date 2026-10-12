@@ -30,6 +30,7 @@ const DEFAULTS = {
   dimOtherLines: true, // fade lines other than the one being spoken
   wordProgress: true,  // underline the words of the active line as they are spoken
   playerSize: 'large', // listen mode: 'normal' | 'large' | 'theater'
+  asrModel: 'base',    // AI transcription model: 'base' | 'small' (asr.js MODELS)
   translateEmail: '',  // optional: sent to MyMemory to raise its free daily translation limit
   aiAuto: true,        // explain words automatically when Chrome's on-device AI is available
   assistModel: '',     // OpenRouter model for "Still unclear?" (free models only; '' = best available)

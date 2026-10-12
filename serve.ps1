@@ -69,17 +69,53 @@ function Get-Transcript([string]$videoId, [string]$lang, [string]$track) {
   return @{ ok = $true; title = $title; track = $pick; tracks = $tracks; vtt = $vtt }
 }
 
+# ---- /api/audio?v=<videoId>: the video's audio track (for AI transcription) ----
+# Uses yt-dlp (winget install yt-dlp.yt-dlp). Files are cached in %TEMP%\lingo-audio.
+$env:Path = [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + [Environment]::GetEnvironmentVariable('Path', 'User')
+$ytdlp = (Get-Command yt-dlp -ErrorAction SilentlyContinue).Source
+$audioDir = Join-Path $env:TEMP 'lingo-audio'
+
+function Get-Audio([string]$videoId) {
+  if ($videoId -notmatch '^[A-Za-z0-9_-]{11}$') { return @{ error = 'bad-id' } }
+  if (-not $ytdlp) { return @{ error = 'no-ytdlp' } }
+  New-Item -ItemType Directory -Force $audioDir | Out-Null
+  $existing = Get-ChildItem $audioDir -Filter "$videoId.*" -ErrorAction SilentlyContinue | Select-Object -First 1
+  if ($existing) { return @{ path = $existing.FullName } }
+  & $ytdlp -f 'bestaudio[ext=m4a]/bestaudio' --no-playlist --quiet --no-warnings `
+    -o (Join-Path $audioDir "$videoId.%(ext)s") "https://www.youtube.com/watch?v=$videoId" 2>&1 | Out-Null
+  $file = Get-ChildItem $audioDir -Filter "$videoId.*" -ErrorAction SilentlyContinue | Select-Object -First 1
+  if (-not $file) { return @{ error = 'download-failed' } }
+  return @{ path = $file.FullName }
+}
+
+function Send-Json($res, $obj, [int]$status = 200) {
+  $res.StatusCode = $status
+  $res.ContentType = 'application/json; charset=utf-8'
+  $res.Headers.Add('Cache-Control', 'no-store')
+  $bytes = [Text.Encoding]::UTF8.GetBytes(($obj | ConvertTo-Json -Depth 5 -Compress))
+  $res.ContentLength64 = $bytes.Length
+  $res.OutputStream.Write($bytes, 0, $bytes.Length)
+}
+
 while ($listener.IsListening) {
   $ctx = $listener.GetContext()
   $res = $ctx.Response
   try {
     $rel = [Uri]::UnescapeDataString($ctx.Request.Url.AbsolutePath.TrimStart('/'))
+    $q = $ctx.Request.QueryString
     if ($rel -eq 'api/transcript') {
-      $q = $ctx.Request.QueryString
-      $result = Get-Transcript $q['v'] $q['lang'] $q['track']
-      $res.ContentType = 'application/json; charset=utf-8'
-      $res.Headers.Add('Cache-Control', 'no-store')
-      $bytes = [Text.Encoding]::UTF8.GetBytes(($result | ConvertTo-Json -Depth 5 -Compress))
+      Send-Json $res (Get-Transcript $q['v'] $q['lang'] $q['track'])
+      continue
+    }
+    if ($rel -eq 'api/capabilities') {
+      Send-Json $res @{ transcripts = $true; audio = [bool]$ytdlp }
+      continue
+    }
+    if ($rel -eq 'api/audio') {
+      $a = Get-Audio $q['v']
+      if ($a.error) { Send-Json $res @{ ok = $false; error = $a.error } 404; continue }
+      $res.ContentType = if ($a.path -like '*.m4a') { 'audio/mp4' } else { 'application/octet-stream' }
+      $bytes = [IO.File]::ReadAllBytes($a.path)
       $res.ContentLength64 = $bytes.Length
       $res.OutputStream.Write($bytes, 0, $bytes.Length)
       continue

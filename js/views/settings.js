@@ -2,6 +2,7 @@ import * as db from '../db.js';
 import { state, LANGS, lang, saveSettings, loadSettings, loadVocab, toast, download, esc } from '../state.js';
 import { onDeviceStatus, installOnDevice, aiStatus } from '../translate.js';
 import { getKey, setKey, listModels, askStronger } from '../assist.js';
+import { MODELS as ASR_MODELS } from '../asr.js';
 
 const langOptions = (selected) =>
   LANGS.map(([code, name]) => `<option value="${code}" ${code === selected ? 'selected' : ''}>${name}</option>`).join('');
@@ -57,6 +58,11 @@ export async function renderSettings(view) {
         ['pauseOnLookup', 'Pause the video when I tap a word'],
         ['resumeAfterLookup', 'Resume when I close the word panel'],
       ].map(([k, label]) => `<label class="row"><input type="checkbox" data-bool="${k}" ${s[k] ? 'checked' : ''}> ${label}</label>`).join('')}
+      <div class="field" style="margin-top:12px"><label for="asrModel">AI transcription model (runs on this device, free)</label>
+        <select id="asrModel">${Object.entries(ASR_MODELS).map(([k, m]) =>
+          `<option value="${k}" ${s.asrModel === k ? 'selected' : ''}>${m.label}</option>`).join('')}</select>
+        <span class="small muted">Used by “Transcribe with AI” and “Check transcript against audio”. Downloaded once, then cached.
+          Fastest in Chrome or Edge on a computer.</span></div>
     </div>
 
     <div class="card">
@@ -145,6 +151,7 @@ export async function renderSettings(view) {
   $('#autoAdjustManual').addEventListener('change', (e) => saveSettings({ autoAdjustManual: e.target.checked }));
   view.querySelectorAll('[data-bool]').forEach((el) =>
     el.addEventListener('change', () => saveSettings({ [el.dataset.bool]: el.checked })));
+  $('#asrModel').addEventListener('change', (e) => saveSettings({ asrModel: e.target.value }).then(() => toast('Saved')));
   $('#translateEmail').addEventListener('change', (e) => saveSettings({ translateEmail: e.target.value.trim() }).then(() => toast('Saved')));
 
   const OD_TEXT = {
