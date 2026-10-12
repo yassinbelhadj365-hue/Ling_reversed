@@ -32,7 +32,8 @@ const DEFAULTS = {
   playerSize: 'large', // listen mode: 'normal' | 'large' | 'theater'
   asrModel: 'base',    // AI transcription model: 'base' | 'small' (asr.js MODELS)
   translateEmail: '',  // optional: sent to MyMemory to raise its free daily translation limit
-  aiAuto: true,        // explain words automatically when Chrome's on-device AI is available
+  aiAuto: true,        // explain automatically on tap (Chrome's on-device AI, else the free OpenRouter model)
+  showEnglish: false,  // show native-language translations right away instead of behind a button
   assistModel: '',     // OpenRouter model for "Still unclear?" (free models only; '' = best available)
   dailyGoal: 20,       // LingQs created per day
   ttsRate: 0.9,

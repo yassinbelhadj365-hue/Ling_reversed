@@ -14,6 +14,7 @@ import { buildTimeline, activeIndex, charAt } from '../js/sync.js';
 import * as db from '../js/db.js';
 import { parseJsonReply, listModels } from '../js/assist.js';
 import { compareLine, heardBetween } from '../js/check.js';
+import { excerptAround, buildPrompt } from '../js/explain.js';
 
 // A scriptable stand-in for the YouTube/media player (js/player.js test hook).
 function makeFakePlayer() {
@@ -159,6 +160,13 @@ try {
   const hb = heardBetween([{ start: 8, end: 12, text: 'A' }, { start: 12, end: 16, text: 'B' }], 8, 12);
   ok(hb === 'A', 'heardBetween: a neighbouring cue that barely overlaps is left out');
 
+  // ---- unit: explanation prompts (explain.js) ----
+  const longT = Array.from({ length: 2000 }, (_, k) => `Línea ${k}.`).join(' ');
+  const exc = excerptAround(longT, 'Línea 1500.', 300);
+  ok(exc.length <= 302 && exc.includes('Línea 1500.'), 'excerptAround keeps the part of the transcript around the sentence');
+  const bp = buildPrompt({ kind: 'word', term: 'casa', sentence: 'Mi casa es tu casa.', transcript: 'Hola. Mi casa es tu casa. Adiós.' });
+  ok(/simple Spanish/.test(bp.system) && /examples/.test(bp.system) && bp.user.includes('Hola. Mi casa'), 'buildPrompt: Spanish first, examples, transcript included');
+
   // ---- unit: timeline (sync.js) ----
   const tl = buildTimeline([{ text: 'a b', start: 0 }, { text: 'c d', start: 4 }, { text: 'e f', start: 9 }]);
   ok(tl.map((x) => x.end).join() === '4,9,21', 'timeline: ends from next start, last capped');
@@ -220,14 +228,16 @@ try {
   ok([...D().querySelectorAll('#reader .w[data-n="comida"]')].every((s) => s.classList.contains('st-1')), 'tapping a word made it LingQ 1 automatically');
   ok(/Auto/.test(D().querySelector('#word-panel .auto-line')?.textContent || ''), 'panel shows the automatic-level line');
   ok(D().querySelector('#word-panel .ctx-sentence mark')?.textContent === 'comida', 'panel marks the tapped word in its sentence');
+  ok(!D().querySelector('#word-panel .ctx-tr') && !D().querySelector('#word-panel #defs'), 'English translations stay hidden until asked for');
+  ok(/No free AI is set up/.test(D().querySelector('#word-panel #explain-area').textContent), 'no AI available → explains how to get explanations in the target language');
+  D().querySelector('#word-panel [data-act="toggle-english"]').click();
   await until(() => /^Today/.test(D().querySelector('#word-panel .ctx-tr')?.textContent || ''));
   ok(/^Today we're going to talk about food\./.test(D().querySelector('#word-panel .ctx-tr')?.textContent || ''), 'panel translates the exact sentence: ' + D().querySelector('#word-panel .ctx-tr')?.textContent);
   await until(() => D().querySelector('#word-panel .meaning-here'));
   ok(/food/.test(D().querySelector('#word-panel .meaning-here')?.textContent || ''), '"Meaning here" picks the dictionary sense that fits the sentence (food, not meal)');
   ok(D().querySelector('#word-panel .ctx-tr mark')?.textContent === 'food', 'the matching word is highlighted in the translation');
-  await until(() => /de comida/.test(D().querySelector('#word-panel #dict-area')?.textContent || ''));
-  ok(/Expression\s*de comida/.test(D().querySelector('#word-panel #dict-area').textContent.replace(/\s+/g, ' ')), 'an expression around the word is detected');
-  ok(!D().querySelector('#word-panel #ai-area').textContent.trim(), 'no on-device AI here → no AI section');
+  await until(() => /de comida/.test(D().querySelector('#word-panel #english-area')?.textContent || ''));
+  ok(/Expression\s*de comida/.test(D().querySelector('#word-panel #english-area').textContent.replace(/\s+/g, ' ')), 'an expression around the word is detected');
   D().querySelector('#reader .tr-btn[data-tr="2"]').click();
   await until(() => /^\[EN\] La comida/.test(D().querySelector('#reader p[data-i="2"] .tr')?.textContent || ''));
   ok(/^\[EN\] La comida/.test(D().querySelector('#reader p[data-i="2"] .tr')?.textContent || ''), 'line translation button shows the line in English');
@@ -337,40 +347,64 @@ try {
   await until(() => inBand(25));
   ok(inBand(25) && D().getElementById('follow-btn').hidden, '"Follow video" jumps back to the spoken line');
 
+  // explanation in the target language first, English on a button; the AI sees the transcript
   let aiInput = null;
-  W().__lingoAI = async (input) => { aiInput = input; return {
-    gloss_in_context: 'this (pointing at the sentence)', lemma: 'este', part_of_speech: 'determiner',
-    grammar_note: 'Feminine singular demonstrative.', multiword_unit: null, sentence_translation: 'This is sentence 25.',
-  }; };
+  const answer = (meaning) => ({
+    target: { meaning, grammar: 'Es un demostrativo femenino.', examples: ['Esta casa es grande.', 'Esta mañana llovió.'] },
+    native: { meaning: 'this', grammar: 'Feminine demonstrative.', translation: 'This is sentence 25.', examples: ['This house is big.', 'This morning it rained.'] },
+    lemma: 'este', part_of_speech: 'determinante', multiword_unit: null,
+  });
+  W().__lingoAI = async (input) => { aiInput = input; return answer('Señala la frase de la que se habla.'); };
   D().querySelector('#reader p[data-i="25"] .w').click();
   await until(() => !D().getElementById('word-panel').hidden);
   ok(!fake.playing, 'tapping a word pauses the video');
-  await until(() => /pointing at the sentence/.test(D().querySelector('#ai-area')?.textContent || ''));
-  ok(/Feminine singular/.test(D().querySelector('#ai-area')?.textContent || ''), 'on-device AI explanation shown with a grammar note');
-  ok(aiInput?.sentence === lines[25] && aiInput.prev === lines[24] && aiInput.next === lines[26], 'AI gets the sentence plus the previous and next lines');
+  await until(() => /Señala la frase/.test(D().querySelector('#explain-area')?.textContent || ''));
+  const ex = D().querySelector('#explain-area');
+  ok(/Esta casa es grande/.test(ex.textContent) && !/This house is big/.test(ex.textContent), 'explanation and examples in Spanish; English examples hidden');
+  ok(aiInput?.kind === 'word' && aiInput.sentence === lines[25] && aiInput.transcript.includes(lines[3]) && aiInput.transcript.includes(lines[38]),
+    'the AI gets the sentence and the whole transcript');
+  D().querySelector('#word-panel [data-act="toggle-english"]').click();
+  ok(/This house is big/.test(D().querySelector('#explain-area').textContent) && /Feminine demonstrative/.test(D().querySelector('#english-area').textContent),
+    'Show English reveals the English explanation and example translations');
 
-  // "Still unclear?": stronger free model in the panel, DeepSeek / ChatGPT in the browser
-  W().__lingoAssist = async (input) => ({ model: 'test/free-model:free', result: {
-    gloss_in_context: 'this one', lemma: 'este', part_of_speech: 'determiner', grammar_note: 'Agrees with "frase".',
-    multiword_unit: null, explanation: 'Points at the sentence being spoken.', example: 'Esta casa es grande. — This house is big.' } });
+  // "Still unclear?": a stronger free model reads the transcript; DeepSeek / ChatGPT hand-offs
+  let deepPrompt = null;
+  W().__lingoAssist = async (p) => { deepPrompt = p; return { model: 'test/free-model:free', result: answer('Explicación más detallada.') }; };
   const opened = [];
   const realOpen = W().open;
   W().open = (url) => { opened.push(url); return null; };
   D().querySelector('#word-panel details.assist summary').click();
-  D().querySelector('#word-panel [data-act="assist"]').click();
-  await until(() => /Points at the sentence/.test(D().querySelector('#assist-area')?.textContent || ''));
-  ok(/test\/free-model:free/.test(D().querySelector('#assist-area').textContent), 'stronger free model answer shown in the panel');
+  D().querySelector('#word-panel [data-act="deep"]').click();
+  await until(() => /Explicación más detallada/.test(D().querySelector('#assist-area')?.textContent || ''));
+  ok(/free-model/.test(D().querySelector('#assist-area').textContent), 'stronger free model answer shown in the panel');
+  ok(deepPrompt.user.includes(lines[3]) && /examples/.test(deepPrompt.system) && /simple Spanish/.test(deepPrompt.system),
+    'the deeper question includes the transcript and asks for Spanish explanations with examples');
   D().querySelector('#word-panel [data-act="chatgpt"]').click();
+  await until(() => opened.length === 1);
   D().querySelector('#word-panel [data-act="deepseek"]').click();
-  await until(() => opened.length === 2);
-  ok(opened[0].startsWith('https://chatgpt.com/?temporary-chat=true&q=') && decodeURIComponent(opened[0]).includes(lines[25]),
-    'Ask ChatGPT opens a temporary (private) chat with the sentence in the question');
-  ok(opened[1] === 'https://chat.deepseek.com/', 'Ask DeepSeek opens DeepSeek’s free chat');
+  await until(() => opened.length === 2 && D().querySelector('#assist-area .handoff'));
+  const q = decodeURIComponent(opened[0]);
+  ok(opened[0].startsWith('https://chatgpt.com/?temporary-chat=true&q=') && q.includes(lines[25]) && /example sentences/.test(q),
+    'ChatGPT opens a private chat asking for a Spanish explanation with example sentences');
+  ok(opened[1] === 'https://chat.deepseek.com/' && /Copy|copied/.test(D().querySelector('#assist-area .handoff').textContent),
+    'DeepSeek: the question is copied (or shown to copy) with paste instructions');
   W().open = realOpen;
   delete W().__lingoAssist;
   delete W().__lingoAI;
   D().querySelector('#word-panel [data-act="close"]').click();
   ok(fake.playing, 'closing the panel resumes it');
+
+  // explain a whole line (sentence mode)
+  W().__lingoAI = async (input) => { aiInput = input; return answer('Es la frase número treinta.'); };
+  D().querySelector('#reader [data-explain="30"]').click();
+  await until(() => /número treinta/.test(D().querySelector('#explain-area')?.textContent || ''));
+  ok(aiInput.kind === 'passage' && aiInput.term === lines[30] && D().querySelectorAll('#word-panel .chip').length >= 6,
+    'the 💬 button explains the whole line, with its words as chips');
+  D().querySelector('#word-panel .chip[data-word="frase"]').click();
+  await until(() => D().querySelector('#word-panel .panel-word')?.textContent === 'frase');
+  ok(D().querySelector('#word-panel .ctx-sentence mark')?.textContent === 'frase', 'tapping a chip opens that word in its sentence');
+  delete W().__lingoAI;
+  D().querySelector('#word-panel [data-act="close"]').click();
 
   fake.set(101, false);
   D().activeElement?.blur();

@@ -1,7 +1,8 @@
 import * as db from '../db.js';
 import { state, LANGS, lang, saveSettings, loadSettings, loadVocab, toast, download, esc } from '../state.js';
-import { onDeviceStatus, installOnDevice, aiStatus } from '../translate.js';
-import { getKey, setKey, listModels, askStronger } from '../assist.js';
+import { onDeviceStatus, installOnDevice } from '../translate.js';
+import { getKey, setKey, listModels } from '../assist.js';
+import { aiStatus, explain } from '../explain.js';
 import { MODELS as ASR_MODELS } from '../asr.js';
 
 const langOptions = (selected) =>
@@ -79,13 +80,16 @@ export async function renderSettings(view) {
     </div>
 
     <div class="card">
-      <h2 style="margin-top:0">AI explanations (on-device)</h2>
-      <p class="small muted">Chrome on a computer can use its built-in AI (Gemini Nano) to explain a word as it’s used in
-        <i>this</i> sentence, with a short grammar note. It runs on your device: free, private and offline after a one-time download.
-        Elsewhere, the free translation and dictionary layers are used.</p>
-      <div class="row"><span class="small">Status:</span> <span id="ai-status" class="small muted">Checking…</span></div>
+      <h2 style="margin-top:0">Explanations</h2>
+      <p class="small muted">When you tap a word or select a sentence, an AI explains it <b>in the language you’re learning</b>,
+        in simple words with example sentences, using the whole transcript as context. English (or your native language)
+        stays hidden behind a button, so you think in the language first. Free sources only: Chrome’s built-in AI (Gemini Nano,
+        on your device) or, elsewhere, the free OpenRouter model set up below.</p>
+      <div class="row"><span class="small">Chrome’s built-in AI:</span> <span id="ai-status" class="small muted">Checking…</span></div>
       <label class="row"><input type="checkbox" data-bool="aiAuto" ${s.aiAuto ? 'checked' : ''}>
-        Explain automatically when I tap a word (otherwise there’s an Explain button)</label>
+        Explain automatically when I tap (otherwise there’s an Explain button — saves free-model daily limits)</label>
+      <label class="row"><input type="checkbox" data-bool="showEnglish" ${s.showEnglish ? 'checked' : ''}>
+        Always show translations in my native language too (no button)</label>
     </div>
 
     <div class="card">
@@ -188,8 +192,8 @@ export async function renderSettings(view) {
   $('#or-test').addEventListener('click', async () => {
     $('#or-status').textContent = 'Asking…';
     try {
-      const { result, model } = await askStronger({ term: 'casa', sentence: 'Mi casa es tu casa.', prev: '', next: '' });
-      $('#or-status').textContent = `✓ Works (${model}): “${result.gloss_in_context}”`;
+      const { result, source } = await explain({ kind: 'word', term: 'casa', sentence: 'Mi casa es tu casa.', transcript: '' }, { depth: 'deep' });
+      $('#or-status').textContent = `✓ Works (${source}): “${result.target?.meaning || ''}”`;
     } catch (err) {
       $('#or-status').textContent = err.message;
     }

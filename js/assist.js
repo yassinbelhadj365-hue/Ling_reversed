@@ -1,12 +1,11 @@
-// "Still unclear?" escalation beyond the free layers. Everything here is free or
-// uses the user's existing subscription; paid models are never offered.
-//   1. a stronger model through OpenRouter: only `:free` models (free account key, no card)
+// Free AI help beyond the on-device layers. Everything here is free or uses the
+// user's existing subscription; paid models are never offered.
+//   1. OpenRouter free models (`:free` only; free account key, no card) — used by explain.js
 //   2. DeepSeek's free web chat and ChatGPT (the user's subscription), opened in the
 //      browser with the question written for them
 // The OpenRouter key is stored only in this browser (kv `secret:openrouter`, excluded from backups).
 import * as db from './db.js';
 import { state, langName } from './state.js';
-import { hash32 } from './text.js';
 
 const API = 'https://openrouter.ai/api/v1';
 const KEY_ROW = 'secret:openrouter';
@@ -36,21 +35,6 @@ export async function defaultModel() {
   try { return (await listModels())[0]?.id || PREFERRED_FREE[0]; } catch { return PREFERRED_FREE[0]; }
 }
 
-function promptFor({ term, sentence, prev, next }) {
-  const L = langName(state.settings.lang), N = langName(state.settings.native);
-  return {
-    system:
-      `You are a patient ${L} tutor. The learner's native language is ${N}. They looked up a word, read the ` +
-      `dictionary and a translation, and still don't understand how it's used in this sentence. Explain it ` +
-      `precisely for this sentence, in ${N}. Reply with JSON only, no markdown, with these keys: ` +
-      `"gloss_in_context" (the meaning here, a few words), "lemma", "part_of_speech", ` +
-      `"grammar_note" (form and why it's used here, max 40 words), "multiword_unit" (the expression it belongs to, or null), ` +
-      `"explanation" (2-4 sentences: what it adds to this sentence, nuance, common confusions), ` +
-      `"example" (one short new ${L} sentence using it the same way, with its ${N} translation).`,
-    user: `${prev ? `Previous line: ${prev}\n` : ''}Sentence: ${sentence}\n${next ? `Next line: ${next}\n` : ''}Word: "${term}"`,
-  };
-}
-
 // Lenient JSON: models sometimes wrap it in ``` fences or add reasoning before it.
 export function parseJsonReply(text) {
   const clean = String(text || '').replace(/<think>[\s\S]*?<\/think>/g, '');
@@ -60,17 +44,14 @@ export function parseJsonReply(text) {
   return JSON.parse(clean.slice(start, end + 1));
 }
 
+// One request to a free OpenRouter model that answers in JSON.
 // -> {result, model} ; throws Error with a user-facing message.
-export async function askStronger(input) {
-  if (window.__lingoAssist) return window.__lingoAssist(input); // smoke-test hook
+export async function openRouterJson({ system, user }) {
+  if (window.__lingoAssist) return window.__lingoAssist({ system, user }); // smoke-test hook
   const key = await getKey();
   if (!key) throw new Error('Add your free OpenRouter key in Settings first.');
   const model = await defaultModel();
   if (!isFree(model)) throw new Error('Only free models are allowed. Pick one in Settings.'); // never spend money
-  const cacheKey = `a|${model}|${state.settings.native}|${hash32(input.sentence)}|${input.term}`;
-  const cached = await db.get('dict', cacheKey);
-  if (cached) return { result: cached.result, model };
-  const p = promptFor(input);
   let res;
   try {
     res = await fetch(`${API}/chat/completions`, {
@@ -84,8 +65,8 @@ export async function askStronger(input) {
       body: JSON.stringify({
         model,
         temperature: 0.2,
-        max_tokens: 1200,
-        messages: [{ role: 'system', content: p.system }, { role: 'user', content: p.user }],
+        max_tokens: 1600,
+        messages: [{ role: 'system', content: system }, { role: 'user', content: user }],
       }),
     });
   } catch {
@@ -99,37 +80,57 @@ export async function askStronger(input) {
     if (res.status === 402 || res.status === 404) throw new Error('This free model is no longer available. Pick another free model in Settings.');
     throw new Error(`OpenRouter: ${msg}`);
   }
-  const result = parseJsonReply(data.choices?.[0]?.message?.content);
-  await db.put('dict', { key: cacheKey, result, at: Date.now() });
-  return { result, model };
+  return { result: parseJsonReply(data.choices?.[0]?.message?.content), model };
 }
 
-// ChatGPT with the user's own subscription: open chatgpt.com with the question
-// prefilled (and copy it, in case the prefill isn't picked up).
-export function chatGptPrompt({ term, sentence, prev, next }) {
+// ---------- hand-offs to chat websites ----------
+
+const CHATGPT_CONTEXT_CHARS = 2500;  // the question travels in the URL, so keep it short
+const DEEPSEEK_CONTEXT_CHARS = 30000; // pasted from the clipboard: the whole transcript fits
+
+function excerpt(transcript, sentence, max) {
+  if (!transcript || transcript.length <= max) return transcript || '';
+  const at = Math.max(0, transcript.indexOf(sentence));
+  const start = Math.max(0, Math.min(at - Math.floor(max / 2), transcript.length - max));
+  return `…${transcript.slice(start, start + max)}…`;
+}
+
+// The question for ChatGPT / DeepSeek: explanation in the target language first,
+// with example sentences, then the native-language version.
+// input: {kind: 'word' | 'passage', term, sentence, transcript}
+export function handoffPrompt(input, maxChars) {
   const L = langName(state.settings.lang), N = langName(state.settings.native);
-  return `I'm learning ${L} and I don't understand the word "${term}" in this sentence:\n\n"${sentence}"\n\n` +
-    `${prev || next ? `Context around it: ${[prev, '[…]', next].filter(Boolean).join(' ')}\n\n` : ''}` +
-    `Please explain in ${N}: what "${term}" means exactly here, its grammar (base form and why this form is used), ` +
-    `whether it's part of an expression, and give 2 short example sentences in ${L} using it the same way, with translations.`;
+  const ctx = excerpt(input.transcript, input.sentence, maxChars);
+  const ask = input.kind === 'passage'
+    ? `I don't fully understand this passage:\n\n"${input.term}"`
+    : `I don't understand "${input.term}" in this sentence:\n\n"${input.sentence}"`;
+  return `I'm learning ${L} (my native language is ${N}). It comes from a video I'm watching. ${ask}\n\n` +
+    `Please answer in this order:\n` +
+    `1. Explain it in simple ${L}, the way a teacher would explain it in ${L} (meaning here, a simpler paraphrase).\n` +
+    `2. Explain the grammar or structure in simple ${L}.\n` +
+    `3. Give 4 natural example sentences in ${L} that use ${input.kind === 'passage' ? 'the same structure' : 'it the same way'} (typical uses).\n` +
+    `4. Then, under a heading "${N}", translate the explanation and the examples, and the ${input.kind === 'passage' ? 'passage' : 'sentence'}.` +
+    `${ctx ? `\n\nTranscript, for context:\n"""\n${ctx}\n"""` : ''}`;
 }
 
-async function copy(text) {
+export async function copyText(text) {
   try { await navigator.clipboard.writeText(text); return true; } catch { return false; }
 }
 
-// Returns whether the question was copied to the clipboard.
+// Opens a ChatGPT temporary (private) chat — not saved in the history — with the
+// question prefilled. Also copies it, in case the prefill isn't picked up.
 export async function openChatGpt(input) {
-  const text = chatGptPrompt(input);
-  const copied = await copy(text); // backup in case the prefill isn't picked up
-  // temporary-chat=true: ChatGPT's private mode, so these chats don't fill up the history.
+  const text = handoffPrompt(input, CHATGPT_CONTEXT_CHARS);
+  const copied = await copyText(text);
   window.open(`https://chatgpt.com/?temporary-chat=true&q=${encodeURIComponent(text)}`, '_blank', 'noopener');
-  return copied;
+  return { text, copied };
 }
 
-// DeepSeek's web chat is free but can't be prefilled: copy the question, then open it.
+// DeepSeek's web chat is free but can't be prefilled: copy the question (with the
+// whole transcript), then open it so the user can paste.
 export async function openDeepSeek(input) {
-  const copied = await copy(chatGptPrompt(input));
+  const text = handoffPrompt(input, DEEPSEEK_CONTEXT_CHARS);
+  const copied = await copyText(text);
   window.open('https://chat.deepseek.com/', '_blank', 'noopener');
-  return copied;
+  return { text, copied };
 }

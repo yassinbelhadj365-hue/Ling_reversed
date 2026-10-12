@@ -256,6 +256,19 @@ body.listen-mode main { max-width: 1400px; }
 .meaning-here { border-color: var(--accent); }
 .defs li.fits { border-color: var(--accent); }
 .ctx-tr mark { background: transparent; color: inherit; font-weight: 700; text-decoration: underline 2px var(--accent); }
+#explain-area { margin: 10px 0; }
+.explain { padding: 10px 12px; border-radius: 10px; border: 1px solid var(--accent); }
+.explain .ex-meaning { font-size: 1.02rem; margin: 0 0 6px; }
+.examples { margin: 4px 0 8px; padding-left: 18px; }
+.examples li { margin-bottom: 4px; }
+.english-toggle { margin: 4px 0 8px; }
+.english { border-left: 3px solid var(--border); padding-left: 10px; }
+.sel-text { font-size: 1.1rem; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+.chip { border: 1px solid var(--border); border-radius: 8px; padding: 2px 8px; cursor: pointer; font: inherit; color: inherit; }
+.chip:not(.st-0):not(.st-1):not(.st-2):not(.st-3):not(.st-4) { background: var(--surface); }
+.handoff { margin-top: 8px; }
+.handoff-text { width: 100%; min-height: 90px; font-size: .85rem; }
 details.assist { margin: 10px 0; padding: 8px 10px; border: 1px dashed var(--border); border-radius: 10px; }
 details.assist summary { cursor: pointer; }
 .ctx-block { margin: 12px 0 4px; padding: 10px 12px; border-radius: 10px; background: var(--surface-2); }

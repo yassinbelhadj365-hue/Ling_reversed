@@ -380,6 +380,7 @@ export async function renderReader(view, id) {
         return html;
       }).join('');
       const tools = `<span class="line-tools">
+        <button class="tr-btn" data-explain="${i}" title="Explain this line" aria-label="Explain this line">💬</button>
         <button class="tr-btn" data-tr="${i}" title="Translate this line" aria-label="Translate this line">⇄</button>
         <button class="tr-btn" data-edit="${i}" title="Correct this line" aria-label="Correct this line">✎</button></span>`;
       return `<p class="cue" data-i="${i}" dir="auto">${time}${words}${tools}</p>`;
@@ -576,6 +577,13 @@ export async function renderReader(view, id) {
   reader.addEventListener('click', async (e) => {
     const cue = e.target.closest('.cue-time');
     if (cue) { seekTo?.(Number(cue.dataset.t)); return; }
+    const explainBtn = e.target.closest('[data-explain]');
+    if (explainBtn) {
+      const i = Number(explainBtn.dataset.explain);
+      pauseForLookup();
+      openSelection([{ i, o: 0, len: lesson.segments[i].text.length, said: lesson.segments[i].text }]);
+      return;
+    }
     const editBtn = e.target.closest('[data-edit]');
     if (editBtn) { editLine(Number(editBtn.dataset.edit)); return; }
     if (e.target.closest('.line-edit')) return;
