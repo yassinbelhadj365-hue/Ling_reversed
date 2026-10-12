@@ -1,5 +1,13 @@
 # Implementation plan: automatic word levels, video-driven transcript, context-aware translation
 
+> **Status (2026-10-12):** C1–C9 are implemented and committed. Decisions taken with the user:
+> - The AI layer uses Chrome's on-device Gemini Nano only, with no API key.
+> - Listening needs 2 untapped passes (configurable).
+> - There is an optional MyMemory email field.
+> - Section 4 extras come after the user has tried the core features.
+>
+> Deviations from the plan: the `lookupMakesLingq` setting was dropped (tapping always makes a LingQ when automatic levels are on). The reader's session list is a chip linking to Vocab → Auto-changed rather than a list inside the panel.
+
 Plan written by the master planning agent after reading `CLAUDE.md`, `js/state.js`, `js/srs.js`, `js/text.js`, `js/dict.js`, `js/db.js`, `js/panel.js`, `js/app.js`, `js/views/{reader,vocab,review,import,settings,library,stats}.js`, `sw.js`, `styles.css` and `tests/smoke.html`. No files were modified.
 
 **Root causes found in the current code**

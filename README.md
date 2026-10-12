@@ -33,10 +33,29 @@ Then open <http://localhost:8080>. (Any static file server works too, e.g. `npx 
 | LingQ concept | Here |
 |---|---|
 | Blue = new word | `status 0`, every word from imported content enters your **word pool** |
-| Yellow = LingQ (levels 1–4) | Tap a word → pick a meaning or a level. Select several words for a **phrase** |
-| White = known | `status 5`. Mark it, or just **turn the page**: blue words you didn't tap become known |
+| Yellow = LingQ (levels 1–4) | **Tapping a word makes it a LingQ automatically.** Select several words for a **phrase** |
+| White = known | `status 5`. Reached automatically (see below) or set by hand |
 | Ignore | Names, typos (`status -1`) |
 | Review | SM-2 style spaced repetition; correct answers raise the LingQ level |
+
+**Automatic word levels** (`js/knowledge.js`): you only tap the words you don't know.
+- **Reading:** a new word you read past without tapping becomes known when you turn the page.
+- **Listening:** a new word you hear in a video without tapping it becomes known after two separate listens. You can change the number in Settings.
+- **LingQs:** a word you tapped climbs a level each time you meet it again without tapping, about 10 encounters to known with at most 3 counted per day. Long flashcard intervals also promote it.
+
+You can always set a level yourself; Known and Ignore stay as you set them. Every automatic change can be undone from the panel, from the page-turn toast, or in **Vocab → Auto-changed**. The thresholds come from research on incidental vocabulary learning (see `docs/PLAN.md`).
+
+**Video lessons (listen mode):** a timed transcript plus a YouTube link or audio/video file shows one continuous transcript that follows playback.
+- **Following:** the line being spoken stays just below the player, with words underlined as they're said. Scroll yourself to look back; **Follow video** returns you to the spoken line.
+- **Lookups:** tapping a word pauses the video, and closing the panel resumes it.
+- **Keys:** `Space` play/pause, `←`/`→` previous/next line, `R` replay.
+- **Fixes and options:** a timing offset corrects transcripts that drift, and the "Translate the current line" option shows each spoken line's translation.
+
+**Translations in context:** tapping a word shows the exact sentence it's in and its translation.
+- **Free translation:** on-device in Chrome or Edge when the language pack is installed; otherwise MyMemory.
+- **"Meaning here":** the dictionary sense that fits the sentence.
+- **Grammar:** word forms (*vamos* = form of *ir*) and expressions (*a pesar de*).
+- **Chrome extra:** in Chrome on a computer, an on-device AI (Gemini Nano) explanation with a grammar note.
 | Stats | Known words, LingQs, coverage of your content, streak, daily goal, 30-day chart |
 
 **Word pool / passive vocabulary:** each word records how often it appears across all your
@@ -46,11 +65,7 @@ a good estimate of how comfortably you can read/listen to it.
 
 **Importing YouTube:** browsers can't fetch YouTube captions directly (CORS), so either copy
 the transcript from YouTube's *Show transcript* panel and paste it, or upload an `.srt`/`.vtt`
-file. Add the video link and the video is embedded; tap a timestamp to jump to that line, and
-the current line is highlighted as it plays. Local audio/video files sync the same way.
-
-**Dictionary:** Wiktionary definitions + MyMemory translations (free, no key), cached locally,
-plus links to Google Translate, DeepL, Wiktionary and Reverso.
+file, and add the video link.
 
 **Keyboard (desktop):** in the word panel `1`–`4` set level, `K` known, `X` ignore, `Esc`
 close. In review: `Space` reveal, `1`–`4` grade, `K` known.
@@ -62,8 +77,12 @@ index.html, styles.css, manifest.webmanifest, sw.js, icon.svg
 js/app.js          router + startup
 js/state.js        settings, in-memory vocabulary, word statuses, word pool, activity, TTS
 js/db.js           IndexedDB wrapper (lessons, media, words, dict cache, activity, settings)
-js/text.js         tokenizer, SRT/VTT/YouTube-transcript/text parsing
-js/dict.js         dictionary lookups
+js/text.js         tokenizer, SRT/VTT/YouTube-transcript/text parsing, sentences, expressions
+js/dict.js         dictionary lookups (Wiktionary incl. word forms, MyMemory)
+js/translate.js    sentence translation, meaning-in-context ranking, on-device AI
+js/knowledge.js    automatic word levels from lookups, reading, listening and review
+js/player.js       YouTube / local media player adapter
+js/sync.js         transcript timeline (active line, word progress)
 js/srs.js          spaced-repetition scheduling
 js/panel.js        the word/phrase panel
 js/views/*.js      library, import, reader, review, vocab (word pool), stats, settings
