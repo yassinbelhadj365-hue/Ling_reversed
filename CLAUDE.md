@@ -10,7 +10,7 @@ Plain HTML/CSS/vanilla ES modules. **No build step, no package.json, no dependen
 
 ## Workflow
 
-Commit after each finished feature or fix (one logical change per commit, imperative subject line), once the smoke test passes. Git was installed via winget; if `git` isn't on PATH in a fresh shell, refresh it with `$env:Path = [Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [Environment]::GetEnvironmentVariable('Path','User')`.
+Commit after each finished feature or fix (one logical change per commit, imperative subject line), once the smoke test passes, then push. Windows PowerShell 5.1 mangles double quotes in native-command arguments, so write multi-line commit messages to a file and use `git commit -F <file>`. Git was installed via winget; if `git` isn't on PATH in a fresh shell, refresh it with `$env:Path = [Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [Environment]::GetEnvironmentVariable('Path','User')`.
 
 ## Commands
 
@@ -41,6 +41,7 @@ The machine has no Node, Python, or git — tooling is PowerShell + Edge.
   - An rAF loop on the player clock drives `activeIndex`, and `followTo()` keeps the active line about 30% down the space below the sticky player.
   - User input (wheel, touchmove, scroll keys) pauses following. The programmatic `scrollBy` never does, because only input events are listened to.
   - A tap pauses playback (`openPanel({onClose})` resumes it).
+  - When playback moves on to the next line naturally (no seek) after ≥60% of a line has played, `onSegmentPassed` sends listen passes for its untapped words, once per line per visit.
   - Per-lesson `syncOffset` and `lastTime`.
 
 **Lessons** store parsed `segments[{text, start?}]` (`start` in seconds when timed) plus a precomputed `words{term: count}`. `parseAny` auto-detects SRT/VTT (dropping YouTube's rolling-caption duplicates), "0:12"-style pasted YouTube transcripts, or plain text; `mergeCues` joins short cues into sentence-sized chunks, keeping the first timestamp. The reader paginates at render time by `settings.pageSize` words. Turning a page forward (`finishPage`) marks untapped blue words known when `settings.pagingKnown` is on.

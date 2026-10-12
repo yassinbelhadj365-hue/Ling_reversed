@@ -173,8 +173,21 @@ export async function renderReader(view, id) {
     raf = player.isPlaying() && !document.hidden ? requestAnimationFrame(tick) : 0;
   }
 
-  // Filled in by C5: a line that played through counts as a listening pass.
-  function onSegmentPassed() {}
+  // A line that played through at normal pace counts as a listening pass for the
+  // words in it you didn't tap there (once per line per visit).
+  const passedSegs = new Set();
+  const clickedBySeg = new Map(); // segment index -> Set of terms looked up in it
+  async function onSegmentPassed(i) {
+    if (!listen || passedSegs.has(i) || document.visibilityState !== 'visible') return;
+    passedSegs.add(i);
+    const tapped = clickedBySeg.get(i) || new Set();
+    const tokens = tokenize(lesson.segments[i].text, lesson.lang).filter((t) => t.n);
+    const terms = [...new Set(tokens.map((t) => t.n))].filter((t) => !tapped.has(t));
+    if (S.autoStatus) track(await applyEvents(terms.map((term) => ({ term, type: 'pass', kind: 'listen' }))));
+    await markSeen(new Set(tokens.map((t) => t.n)));
+    await bumpActivity({ read: tokens.length });
+    refresh();
+  }
 
   if (player) {
     player.on('state', (playing) => {
@@ -388,7 +401,10 @@ export async function renderReader(view, id) {
 
   // A tap is a lookup: with automatic levels on, it makes the word a LingQ
   // (or drops a LingQ one level). Only the first tap per page counts.
-  async function lookup(term) {
+  async function lookup(term, p) {
+    const seg = Number(p.dataset.i);
+    if (!clickedBySeg.has(seg)) clickedBySeg.set(seg, new Set());
+    for (const t of [term, ...term.split(' ')]) clickedBySeg.get(seg).add(t);
     const first = !clicked.has(term);
     clicked.add(term);
     if (first && S.autoStatus) track(await applyEvents([{ term, type: 'lookup' }]));
@@ -401,7 +417,7 @@ export async function renderReader(view, id) {
     if (!span) return;
     if (!getSelection().isCollapsed) return; // a phrase selection is being made
     pauseForLookup();
-    await lookup(span.dataset.n);
+    await lookup(span.dataset.n, span.closest('p'));
     open(span.dataset.n, span.closest('p'), [span]);
     refresh();
   });
@@ -419,7 +435,7 @@ export async function renderReader(view, id) {
     // The phrase is looked up; its words were seen while selecting, so they don't count as clean passes.
     spans.forEach((s) => clicked.add(s.dataset.n));
     const term = spans.map((s) => s.dataset.n).join(' ');
-    await lookup(term);
+    await lookup(term, p);
     open(term, p, spans);
     refresh();
   }

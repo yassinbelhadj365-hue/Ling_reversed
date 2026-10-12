@@ -8,6 +8,7 @@ import { tokenize, parseAny, mergeCues, youTubeId, parseSubtitles } from '../js/
 import { grade, freshSrs } from '../js/srs.js';
 import { onLookup, onPass, onManual, onReview, undoPatch, computeStatus } from '../js/knowledge.js';
 import { buildTimeline, activeIndex, charAt } from '../js/sync.js';
+import * as db from '../js/db.js';
 
 // A scriptable stand-in for the YouTube/media player (js/player.js test hook).
 function makeFakePlayer() {
@@ -263,6 +264,28 @@ try {
   D().querySelector('[data-ctl="sync+"]').click();
   ok(D().getElementById('sync-val').textContent === '0.25s', 'sync offset adjusts');
   fake.set(104, false);
+
+  // listening to a line all the way through is evidence for its untapped words
+  async function playThrough(from, to) {
+    fake.set(from, true);
+    for (let t = from; t <= to; t += 0.25) { fake.set(t); await sleep(25); }
+    fake.set(to, false);
+    await sleep(300);
+  }
+  D().querySelector('#reader p[data-i="0"] .w[data-n="perro"]').click();   // tap "perro" in line 0
+  await until(() => !D().getElementById('word-panel').hidden);
+  D().querySelector('#word-panel [data-act="close"]').click();
+  await playThrough(0, 4.2);
+  const corre1 = await db.get('words', 'es|corre');
+  ok(corre1?.ev?.pre === 1 && corre1.status === 0, `one listen: "corre" has 1 listening pass, still new (pre ${corre1?.ev?.pre}, status ${corre1?.status})`);
+  ok((await db.get('words', 'es|perro'))?.ev?.since === 0, 'the word tapped in that line did not get a clean pass there');
+  W().location.hash = '#/library';                 // a second visit counts again
+  await until(() => D().querySelector('.lesson-card'));
+  W().history.back();
+  await until(() => V().classList.contains('listen') && D().querySelector('#reader .w'));
+  await playThrough(0, 4.2);
+  const corre2 = await db.get('words', 'es|corre');
+  ok(corre2?.status === 5, `second untapped listen: "corre" is known (status ${corre2?.status})`);
 
   ok(!D().body.dataset.error, 'no runtime errors: ' + (D().body.dataset.error || 'none'));
 } catch (e) {
