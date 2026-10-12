@@ -156,6 +156,10 @@ textarea { min-height: 160px; resize: vertical; }
 .w.st-2 { background: var(--w-2); }
 .w.st-3 { background: var(--w-3); }
 .w.st-4 { background: var(--w-4); }
+.w[data-flag] { text-decoration: underline wavy var(--danger); text-underline-offset: 5px; text-decoration-thickness: 1.5px; }
+.panel-word.small-title { font-size: 1.1rem; }
+.flag-box { border-color: var(--danger); margin-bottom: 8px; }
+.check-row { display: inline-flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .w.in-phrase { text-decoration: underline 2px var(--w-phrase); text-underline-offset: 5px; }
 .w.active { outline: 2px solid var(--w-active); }
 /* ---------- listen mode: the video drives the transcript ---------- */

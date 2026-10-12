@@ -248,6 +248,7 @@ export async function updateLessonLine(lesson, i, newText) {
   const after = countWords([{ text: newText }], lesson.lang).counts;
   seg.text = newText;
   delete seg.marks;
+  if (lesson.flags) delete lesson.flags[i]; // transcript-check flags point into the old text
   const changed = [];
   for (const term of new Set([...Object.keys(before), ...Object.keys(after)])) {
     const delta = (after[term] || 0) - (before[term] || 0);

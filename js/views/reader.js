@@ -16,6 +16,8 @@ import { NEW, KNOWN, isLearning } from '../srs.js';
 import { openPanel, closePanel, panelTerm } from '../panel.js';
 import { createPlayer } from '../player.js';
 import { buildTimeline, activeIndex, charAt } from '../sync.js';
+import { fetchYouTubeAudio, decodeAudio, transcribe, progressText, AUDIO_ERRORS } from '../asr.js';
+import { checkTranscript } from '../check.js';
 
 const SYNC_STEP = 0.25;          // seconds per sync-offset click
 const JUMP_BACK = -0.3;          // clock moving back more than this = a seek
@@ -78,6 +80,10 @@ export async function renderReader(view, id) {
           <button class="btn small" data-ctl="sync+" aria-label="Text later">+</button>
         </span>
         <label class="small follow-toggle"><input type="checkbox" id="auto-tr" ${lesson.showTr ? 'checked' : ''}> Translate the current line</label>
+        <span class="check-row">
+          <button class="btn small" data-ctl="check" title="Listen to the audio with AI and flag transcript words that don't match">🎙 Check transcript against the audio</button>
+          <span id="check-status" class="small muted"></span>
+        </span>
         <button class="btn small" id="next">Finish lesson ✓</button>
       </div>
     </div>
@@ -305,6 +311,8 @@ export async function renderReader(view, id) {
         toast(`Player: ${next}`, 1500);
         requestAnimationFrame(() => followTo(activeIdx, true));
       }
+      else if (name === 'check') runCheck();
+      else if (name === 'clear-flags') { lesson.flags = {}; saveLesson(); rerender(); showFlagCount(); }
       else if (name === 'more') {
         const more = $('#follow-more');
         more.hidden = !more.hidden;
@@ -363,8 +371,11 @@ export async function renderReader(view, id) {
         ? `<button class="cue-time" data-t="${seg.start}" title="Play from here">▶ ${formatTime(seg.start)}</button>`
         : '';
       let o = 0; // character offset of each word, for word-by-word progress
+      const flags = lesson.flags?.[i] || [];
       const words = tokenize(seg.text, lesson.lang).map((t) => {
-        const html = t.n ? `<span class="w ${statusClass(t.n)}" data-n="${esc(t.n)}" data-o="${o}">${esc(t.t)}</span>` : esc(t.t);
+        const k = flags.findIndex((f) => o >= f.o && o < f.o + f.len);
+        const flag = k >= 0 ? ` data-flag="${k}" title="The audio may say: ${esc(flags[k].heard || '(nothing)')}"` : '';
+        const html = t.n ? `<span class="w ${statusClass(t.n)}" data-n="${esc(t.n)}" data-o="${o}"${flag}>${esc(t.t)}</span>` : esc(t.t);
         o += t.t.length;
         return html;
       }).join('');
@@ -434,7 +445,12 @@ export async function renderReader(view, id) {
     const mark = from - start >= 0 && to - start <= sentence.length ? [from - start, to - start] : null;
     const i = Number(p.dataset.i);
     const around = { prev: lesson.segments[i - 1]?.text.slice(-200) || '', next: lesson.segments[i + 1]?.text.slice(0, 200) || '' };
-    openPanel(term, { context: sentence, mark, around, onChange: refresh, onClose: onPanelClose });
+    const flag = spans.length === 1 && spans[0].dataset.flag !== undefined ? flagActions(i, Number(spans[0].dataset.flag)) : null;
+    openPanel(term, {
+      context: sentence, mark, around, flag, transcript: transcriptText(),
+      onFlag: flag ? null : () => flagRanges(rangesOf(spans)),
+      onChange: refresh, onClose: onPanelClose,
+    });
     if (listen) requestAnimationFrame(() => followTo(activeIdx, true));
   }
 
@@ -463,6 +479,65 @@ export async function renderReader(view, id) {
     if (first && S.autoStatus) track(await applyEvents([{ term, type: 'lookup' }]));
   }
 
+  // ---------- transcript check: flag words the audio doesn't seem to say ----------
+  const saveLesson = () => { lesson.updatedAt = Date.now(); return db.put('lessons', lesson); };
+  const rerender = () => { const y = scrollY; renderPage(); scrollTo(0, y); };
+  const flagCount = () => Object.values(lesson.flags || {}).reduce((a, f) => a + f.length, 0);
+  function showFlagCount(msg) {
+    const el = $('#check-status');
+    if (!el) return;
+    const n = flagCount();
+    el.innerHTML = msg ? esc(msg) : n
+      ? `${plural(n, 'possible mistake')} flagged <button class="btn small" data-ctl="clear-flags">Clear flags</button>`
+      : (lesson.flagsAt ? 'No mismatches found.' : '');
+  }
+
+  let checking = false;
+  async function runCheck() {
+    if (checking || !player) return;
+    checking = true;
+    const show = (p) => showFlagCount(progressText(p));
+    try {
+      show({ stage: 'audio' });
+      const raw = lesson.youtubeId ? await fetchYouTubeAudio(lesson.youtubeId) : await media.blob.arrayBuffer();
+      show({ stage: 'decode' });
+      const audio = await decodeAudio(raw);
+      const cues = await transcribe(audio, { lang: lesson.lang, onProgress: show });
+      lesson.flags = checkTranscript(lesson.segments, timeline, cues, lesson.lang);
+      lesson.flagsAt = Date.now();
+      await saveLesson();
+      if (!dead) { rerender(); showFlagCount(); toast(flagCount() ? `${plural(flagCount(), 'possible mistake')} flagged — tap an underlined word` : 'The transcript matches the audio.', 5000); }
+    } catch (err) {
+      showFlagCount(AUDIO_ERRORS[err.message] || `Check failed: ${err.message}`);
+    } finally {
+      checking = false;
+    }
+  }
+
+  // Panel actions for a flagged word.
+  function flagActions(i, k) {
+    const f = lesson.flags[i][k];
+    const drop = () => {
+      lesson.flags[i].splice(k, 1);
+      if (!lesson.flags[i].length) delete lesson.flags[i];
+    };
+    return {
+      ...f,
+      replace: async () => {
+        const text = lesson.segments[i].text;
+        const delta = f.heard.length - f.len;
+        drop();
+        const rest = (lesson.flags[i] || []).map((g) => (g.o > f.o ? { ...g, o: g.o + delta } : g));
+        await updateLessonLine(lesson, i, text.slice(0, f.o) + f.heard + text.slice(f.o + f.len));
+        if (rest.length) lesson.flags[i] = rest;
+        await saveLesson();
+        closePanel(); rerender(); showFlagCount(); toast('Transcript corrected');
+      },
+      dismiss: async () => { drop(); await saveLesson(); closePanel(); rerender(); showFlagCount(); },
+      edit: () => editLine(i),
+    };
+  }
+
   // Correct a transcript line in place; the lesson and word pool are updated.
   function editLine(i) {
     const p = reader.querySelector(`p[data-i="${i}"]`);
@@ -474,7 +549,6 @@ export async function renderReader(view, id) {
       <span class="row"><button class="btn small primary" data-save>Save</button><button class="btn small" data-cancel>Cancel</button></span></span>`;
     const ta = p.querySelector('textarea');
     ta.focus();
-    const rerender = () => { const y = scrollY; renderPage(); scrollTo(0, y); };
     p.querySelector('[data-cancel]').addEventListener('click', rerender);
     p.querySelector('[data-save]').addEventListener('click', async () => {
       const text = ta.value.replace(/\s+/g, ' ').trim();
@@ -511,28 +585,71 @@ export async function renderReader(view, id) {
     if (!span) return;
     if (!getSelection().isCollapsed) return; // a phrase selection is being made
     pauseForLookup();
-    await lookup(span.dataset.n, span.closest('p'));
+    // Tapping a flagged word is checking the transcript, not admitting you don't know it.
+    if (span.dataset.flag === undefined) await lookup(span.dataset.n, span.closest('p'));
+    else clicked.add(span.dataset.n);
     open(span.dataset.n, span.closest('p'), [span]);
     refresh();
   });
 
-  // Phrase selection: drag (mouse) or long-press + handles (touch) across 2–10 words.
+  // The transcript ranges covered by a set of word spans: [{i, o, len, said}], one per line.
+  function rangesOf(spans) {
+    return [...new Set(spans.map((s) => s.closest('p')))].map((p) => {
+      const ss = spans.filter((s) => s.closest('p') === p);
+      const o = Number(ss[0].dataset.o);
+      const last = ss.at(-1);
+      const len = Number(last.dataset.o) + last.textContent.length - o;
+      const i = Number(p.dataset.i);
+      return { i, o, len, said: lesson.segments[i].text.slice(o, o + len) };
+    });
+  }
+
+  // Flag text you think is wrong in the transcript (shown with the same wavy underline).
+  async function flagRanges(ranges) {
+    lesson.flags ||= {};
+    for (const r of ranges) {
+      const list = (lesson.flags[r.i] || []).filter((f) => f.o + f.len <= r.o || f.o >= r.o + r.len);
+      list.push({ o: r.o, len: r.len, said: r.said, heard: '', manual: true });
+      lesson.flags[r.i] = list.sort((a, b) => a.o - b.o);
+    }
+    await saveLesson();
+    closePanel(); rerender(); showFlagCount();
+    toast('Flagged as wrong. Fix it with ✎, or tap the underlined text later.', 4000);
+  }
+
+  // Selecting text: 2–10 words in one line = a phrase; anything longer (sentences,
+  // several lines) opens the selected-text panel. Nothing is saved until you choose.
   async function onSelect() {
     const sel = getSelection();
     if (!sel || sel.isCollapsed || !reader.contains(sel.anchorNode)) return;
     const spans = [...reader.querySelectorAll('.w')].filter((s) => sel.containsNode(s, true));
-    if (spans.length < 2 || spans.length > 10) return;
-    const p = spans[0].closest('p');
-    if (spans.some((s) => s.closest('p') !== p)) return toast('Select a phrase within one paragraph.');
+    if (spans.length < 2) return;
     sel.removeAllRanges();
     pauseForLookup();
-    // The phrase is looked up; its words were seen while selecting, so they don't count as clean passes.
+    // Words seen while selecting don't count as clean passes.
     spans.forEach((s) => clicked.add(s.dataset.n));
-    const term = spans.map((s) => s.dataset.n).join(' ');
-    await lookup(term, p);
-    open(term, p, spans);
+    const ranges = rangesOf(spans);
+    if (ranges.length === 1 && spans.length <= 10) {
+      open(spans.map((s) => s.dataset.n).join(' '), spans[0].closest('p'), spans);
+    } else {
+      openSelection(ranges);
+    }
     refresh();
   }
+
+  function openSelection(ranges) {
+    const first = ranges[0].i, last = ranges.at(-1).i;
+    openPanel(ranges.map((r) => r.said).join(' '), {
+      mode: 'selection',
+      context: ranges.map((r) => r.said).join(' '),
+      around: { prev: lesson.segments[first - 1]?.text.slice(-200) || '', next: lesson.segments[last + 1]?.text.slice(0, 200) || '' },
+      transcript: transcriptText(),
+      onFlag: () => flagRanges(ranges),
+      onClose: onPanelClose,
+    });
+  }
+
+  const transcriptText = () => lesson.segments.map((s) => s.text).join('\n');
   reader.addEventListener('mouseup', () => setTimeout(onSelect, 0));
   let selTimer;
   const onSelChange = () => { clearTimeout(selTimer); selTimer = setTimeout(onSelect, 700); };
@@ -642,6 +759,6 @@ export async function renderReader(view, id) {
   });
 
   renderPage();
-  if (listen) $('#follow-btn').hidden = true;
+  if (listen) { $('#follow-btn').hidden = true; showFlagCount(); }
   return () => cleanups.forEach((fn) => fn());
 }

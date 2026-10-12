@@ -122,7 +122,8 @@ async function copy(text) {
 export async function openChatGpt(input) {
   const text = chatGptPrompt(input);
   const copied = await copy(text); // backup in case the prefill isn't picked up
-  window.open(`https://chatgpt.com/?q=${encodeURIComponent(text)}`, '_blank', 'noopener');
+  // temporary-chat=true: ChatGPT's private mode, so these chats don't fill up the history.
+  window.open(`https://chatgpt.com/?temporary-chat=true&q=${encodeURIComponent(text)}`, '_blank', 'noopener');
   return copied;
 }
 

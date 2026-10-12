@@ -13,6 +13,7 @@ import { onLookup, onPass, onManual, onReview, undoPatch, computeStatus } from '
 import { buildTimeline, activeIndex, charAt } from '../js/sync.js';
 import * as db from '../js/db.js';
 import { parseJsonReply, listModels } from '../js/assist.js';
+import { compareLine, heardBetween } from '../js/check.js';
 
 // A scriptable stand-in for the YouTube/media player (js/player.js test hook).
 function makeFakePlayer() {
@@ -145,6 +146,18 @@ try {
   await db.setSetting('secret:test', 'sk-123');
   ok(!(await db.exportAll()).data.kv.some((r) => r.key.startsWith('secret:')), 'backups never contain API keys');
   await db.del('kv', 'secret:test');
+
+  // ---- unit: transcript check (check.js) ----
+  const cf = compareLine('Esta es la frase número 2 del vídeo largo.', 'Esta es la frase número dos del video largo', 'es');
+  ok(cf.length === 1 && cf[0].said === 'vídeo' && cf[0].heard === 'video', 'compareLine: flags the word the audio says differently ' + JSON.stringify(cf));
+  ok(!compareLine('Hola a todos', 'Hola a todos y bienvenidos', 'es').length, 'compareLine: extra heard words from a neighbour line are not mistakes');
+  ok(!compareLine('Una frase completamente distinta aquí', 'nada que ver con esto ahora', 'es').length, 'compareLine: unreliable recognition (little overlap) flags nothing');
+  const edge = compareLine('Hola amigo mío', 'bueno pues Hola amiga mío', 'es');
+  ok(edge.length === 1 && edge[0].heard === 'amiga', 'compareLine: substitution in the middle');
+  const lead = compareLine('Pero hola amigo mío', 'lo dijo y hola amigo mío', 'es');
+  ok(lead.length === 1 && lead[0].said === 'Pero' && lead[0].heard === 'y', 'compareLine: at the line start only the adjacent heard word is suggested');
+  const hb = heardBetween([{ start: 8, end: 12, text: 'A' }, { start: 12, end: 16, text: 'B' }], 8, 12);
+  ok(hb === 'A', 'heardBetween: a neighbouring cue that barely overlaps is left out');
 
   // ---- unit: timeline (sync.js) ----
   const tl = buildTimeline([{ text: 'a b', start: 0 }, { text: 'c d', start: 4 }, { text: 'e f', start: 9 }]);
@@ -350,7 +363,8 @@ try {
   D().querySelector('#word-panel [data-act="chatgpt"]').click();
   D().querySelector('#word-panel [data-act="deepseek"]').click();
   await until(() => opened.length === 2);
-  ok(opened[0].startsWith('https://chatgpt.com/?q=') && decodeURIComponent(opened[0]).includes(lines[25]), 'Ask ChatGPT opens chatgpt.com with the sentence in the question');
+  ok(opened[0].startsWith('https://chatgpt.com/?temporary-chat=true&q=') && decodeURIComponent(opened[0]).includes(lines[25]),
+    'Ask ChatGPT opens a temporary (private) chat with the sentence in the question');
   ok(opened[1] === 'https://chat.deepseek.com/', 'Ask DeepSeek opens DeepSeek’s free chat');
   W().open = realOpen;
   delete W().__lingoAssist;
@@ -409,6 +423,50 @@ try {
   ok(after.segments[39].text.endsWith('vídeo corto.') && after.words['corto'] === 1 && after.words['largo'] === largoBefore - 1,
     'edited line saved and lesson word counts updated');
   ok(corto?.freq === 1 && corto.lessons.includes(after.id) && corto.status === 0, 'a word introduced by the correction joins the pool as new');
+
+  // ---- transcript check against the audio (audio + Whisper stubbed) ----
+  const wavSilence = (() => {
+    const n = 16000, b = new ArrayBuffer(44 + n * 2), v = new DataView(b);
+    const s = (o, t) => [...t].forEach((c, i) => v.setUint8(o + i, c.charCodeAt(0)));
+    s(0, 'RIFF'); v.setUint32(4, 36 + n * 2, true); s(8, 'WAVEfmt '); v.setUint32(16, 16, true); v.setUint16(20, 1, true);
+    v.setUint16(22, 1, true); v.setUint32(24, 16000, true); v.setUint32(28, 32000, true); v.setUint16(32, 2, true);
+    v.setUint16(34, 16, true); s(36, 'data'); v.setUint32(40, n * 2, true);
+    return b;
+  })();
+  const realFetch0 = W().fetch;
+  W().fetch = async (url, ...rest) => String(url).startsWith('api/audio')
+    ? new Response(wavSilence.slice(0), { headers: { 'content-type': 'audio/wav' } }) : realFetch0(url, ...rest);
+  W().__lingoASR = async () => [
+    { start: 8, end: 12, text: 'Esta es la frase número dos del video largo.' },
+    { start: 12, end: 16, text: 'Esta es la frase número tres del vídeo largo.' },
+  ];
+  D().querySelector('[data-ctl="check"]').click();
+  await until(() => D().querySelector('#reader p[data-i="2"] .w[data-flag]'));
+  const flagged = [...D().querySelectorAll('#reader .w[data-flag]')];
+  ok(flagged.length === 1 && flagged[0].dataset.n === 'vídeo' && flagged[0].closest('p').dataset.i === '2', 'check flags only the word the audio says differently (line 2, vídeo/video)');
+  ok(/1 possible mistake/.test(D().getElementById('check-status').textContent), 'flag count shown');
+  flagged[0].click();
+  await until(() => D().querySelector('#word-panel .flag-box'));
+  D().querySelector('#word-panel [data-act="flag-replace"]').click();
+  await until(() => !D().querySelector('#reader .w[data-flag]'));
+  const fixed = await db.get('lessons', Number(videoId));
+  ok(fixed.segments[2].text === 'Esta es la frase número 2 del video largo.' && !fixed.flags[2], 'Replace corrects the transcript and clears the flag');
+  W().fetch = realFetch0;
+  delete W().__lingoASR;
+
+  // flag a stretch spanning two lines yourself
+  const r56 = D().createRange();
+  r56.setStartBefore(D().querySelector('#reader p[data-i="5"] .w[data-n="frase"]'));
+  r56.setEndAfter(D().querySelector('#reader p[data-i="6"] .w[data-n="es"]'));
+  W().getSelection().removeAllRanges(); W().getSelection().addRange(r56);
+  D().getElementById('reader').dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+  await until(() => D().querySelector('#word-panel .small-title'));
+  ok(/Selected text/.test(D().querySelector('#word-panel').textContent), 'selecting across lines opens the selected-text panel');
+  D().querySelector('#word-panel [data-act="flag-wrong"]').click();
+  await until(() => D().querySelector('#reader p[data-i="6"] .w[data-flag]'));
+  const manual = await db.get('lessons', Number(videoId));
+  ok(manual.flags[5]?.[0].manual && manual.flags[5][0].said === 'frase número 5 del vídeo largo' && manual.flags[6]?.[0].said === 'Esta es',
+    'flag as wrong marks the selected text on both lines ' + JSON.stringify([manual.flags[5], manual.flags[6]]));
 
   // ---- automatic transcript from just a YouTube link (server response stubbed) ----
   const realFetch = W().fetch;

@@ -17,15 +17,55 @@ let current = null;
 const STATUS_LABEL = { [NEW]: 'New word', 1: 'LingQ · level 1', 2: 'LingQ · level 2', 3: 'LingQ · level 3', 4: 'LingQ · level 4', [KNOWN]: 'Known', [IGNORED]: 'Ignored' };
 
 // around: {prev, next} neighbouring lines, extra context for the AI explanation.
-export function openPanel(term, { context = '', mark = null, around = {}, onChange, onClose } = {}) {
-  current = { term, context, mark, around, onChange, onClose, defs: null, tr: null, expr: null, list: [], ai: null, assist: null };
+// flag: a transcript-check flag on this word: {said, heard, replace(), dismiss(), edit()}.
+// mode: 'word' (a word or phrase) | 'selection' (a sentence or longer stretch you selected).
+// transcript: the whole lesson text, so AI explanations can use the full context.
+// onFlag: marks this text as wrong in the transcript.
+export function openPanel(term, {
+  mode = 'word', context = '', mark = null, around = {}, flag = null, transcript = '', onFlag = null, onChange, onClose,
+} = {}) {
+  current = {
+    term, mode, context, mark, around, flag, transcript, onFlag, onChange, onClose,
+    defs: null, tr: null, expr: null, list: [], ai: null, assist: null,
+  };
   render();
   panel.hidden = false;
+  loadSentence(term, context);
+  if (mode === 'selection') return;
   rememberContext();
   loadDefs(term);
-  loadSentence(term, context);
   loadExpression(term, context, mark);
   loadAI(term, { auto: state.settings.aiAuto });
+}
+
+function flagBoxHtml() {
+  const f = current.flag;
+  if (!f) return '';
+  const what = f.manual
+    ? `You flagged <b dir="auto">${esc(f.said)}</b> as possibly wrong in the transcript.`
+    : `The transcript says <b dir="auto">${esc(f.said)}</b>, but the audio may say <b dir="auto">${f.heard ? esc(f.heard) : '(nothing)'}</b>.`;
+  return `<div class="dict-line flag-box"><span class="small muted">Transcript check</span><div>${what}</div>
+    <div class="row" style="grid-column:1/-1">
+      ${f.heard ? `<button class="btn small primary" data-act="flag-replace">Replace with “${esc(f.heard)}”</button>` : ''}
+      <button class="btn small" data-act="flag-edit">Edit the line</button>
+      <button class="btn small" data-act="flag-dismiss">${f.manual ? 'Remove flag' : 'Not a mistake'}</button>
+    </div></div>`;
+}
+
+const flagButtonHtml = () => (current.onFlag
+  ? `<p class="small"><button class="btn small" data-act="flag-wrong" title="Mark this as a transcript mistake">⚑ Flag as wrong in the transcript</button></p>` : '');
+
+function renderSelection() {
+  panel.innerHTML = `
+    <div class="row spread">
+      <h2 class="panel-word small-title">Selected text</h2>
+      <div class="row">
+        <button class="btn small" data-act="speak" aria-label="Listen">🔊</button>
+        <button class="btn small" data-act="close" aria-label="Close">✕</button>
+      </div>
+    </div>
+    ${sentenceHtml()}
+    ${flagButtonHtml()}`;
 }
 
 // ---------- on-device AI explanation (optional, Chrome only) ----------
@@ -253,6 +293,7 @@ export function closePanel() {
 export const panelTerm = () => current?.term ?? null;
 
 function render() {
+  if (current.mode === 'selection') return renderSelection();
   const { term } = current;
   const w = getWord(term);
   const status = w?.status ?? NEW;
@@ -273,6 +314,7 @@ function render() {
         <button class="btn small" data-act="close" aria-label="Close">✕</button>
       </div>
     </div>
+    ${flagBoxHtml()}
     <div class="muted small">${STATUS_LABEL[status]}${where}</div>
     ${autoLine(w)}
     <div class="status-row" role="group" aria-label="Set status">
@@ -293,7 +335,8 @@ function render() {
     ${related.length ? `<p class="small">In phrases: ${related.map((r) => `<button class="btn small" data-open="${esc(r.term)}">${esc(r.term)}</button>`).join(' ')}</p>` : ''}
     <div id="dict-area">${dictAreaHtml()}</div>
     <p class="small">${externalLinks(term, lang(), state.settings.native)
-      .map(([name, url]) => `<a href="${esc(url)}" target="_blank" rel="noopener">${name}</a>`).join(' · ')}</p>`;
+      .map(([name, url]) => `<a href="${esc(url)}" target="_blank" rel="noopener">${name}</a>`).join(' · ')}</p>
+    ${flagButtonHtml()}`;
 }
 
 function autoLine(w) {
@@ -367,6 +410,10 @@ panel.addEventListener('click', (e) => {
   if (t.dataset.act === 'speak') return speak(current.term);
   if (t.dataset.act === 'undo') return undo();
   if (t.dataset.act === 'save-expr') return saveExpression();
+  if (t.dataset.act === 'flag-wrong') return current.onFlag();
+  if (t.dataset.act === 'flag-replace') return current.flag.replace();
+  if (t.dataset.act === 'flag-dismiss') return current.flag.dismiss();
+  if (t.dataset.act === 'flag-edit') { const f = current.flag; closePanel(); return f.edit(); }
   if (t.dataset.act === 'ai-run') return loadAI(current.term, { auto: true, download: true });
   if (t.dataset.act === 'ai-hint') return saveHint(current.ai.result.gloss_in_context);
   if (t.dataset.act === 'assist') return askStrongerAI();
@@ -391,6 +438,7 @@ panel.addEventListener('change', (e) => {
 
 document.addEventListener('keydown', (e) => {
   if (!current || e.ctrlKey || e.metaKey || e.altKey) return;
+  if (current.mode === 'selection') { if (e.key === 'Escape') closePanel(); return; }
   if (/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName)) {
     if (e.key === 'Escape') document.activeElement.blur();
     return;
