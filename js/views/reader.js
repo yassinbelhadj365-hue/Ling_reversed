@@ -413,7 +413,9 @@ export async function renderReader(view, id) {
     const to = Number(last.dataset.o) + last.textContent.length;
     const { sentence, start } = sentenceAt(text, from);
     const mark = from - start >= 0 && to - start <= sentence.length ? [from - start, to - start] : null;
-    openPanel(term, { context: sentence, mark, onChange: refresh, onClose: onPanelClose });
+    const i = Number(p.dataset.i);
+    const around = { prev: lesson.segments[i - 1]?.text.slice(-200) || '', next: lesson.segments[i + 1]?.text.slice(0, 200) || '' };
+    openPanel(term, { context: sentence, mark, around, onChange: refresh, onClose: onPanelClose });
     if (listen) requestAnimationFrame(() => followTo(activeIdx, true));
   }
 

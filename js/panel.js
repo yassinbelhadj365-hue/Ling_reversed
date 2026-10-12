@@ -1,10 +1,10 @@
 // The word/phrase panel: status buttons, your hint, dictionary results.
 // Side sheet on desktop, bottom sheet on phones.
-import { state, lang, getWord, setStatus, saveWord, undoAuto, speak, esc } from './state.js';
+import { state, lang, langName, getWord, setStatus, saveWord, undoAuto, speak, esc } from './state.js';
 import { lookup, lookupExpression, externalLinks } from './dict.js';
 import { NEW, KNOWN, IGNORED, isLearning } from './srs.js';
 import { progress } from './knowledge.js';
-import { translateSentence, rankByContext, sentenceLinks, ERROR_TEXT } from './translate.js';
+import { translateSentence, rankByContext, sentenceLinks, ERROR_TEXT, aiStatus, explainInContext } from './translate.js';
 import { expressionCandidates } from './text.js';
 
 const UNDO_WINDOW = 10 * 60 * 1000;
@@ -15,14 +15,72 @@ let current = null;
 
 const STATUS_LABEL = { [NEW]: 'New word', 1: 'LingQ · level 1', 2: 'LingQ · level 2', 3: 'LingQ · level 3', 4: 'LingQ · level 4', [KNOWN]: 'Known', [IGNORED]: 'Ignored' };
 
-export function openPanel(term, { context = '', mark = null, onChange, onClose } = {}) {
-  current = { term, context, mark, onChange, onClose, defs: null, tr: null, expr: null, list: [] };
+// around: {prev, next} neighbouring lines, extra context for the AI explanation.
+export function openPanel(term, { context = '', mark = null, around = {}, onChange, onClose } = {}) {
+  current = { term, context, mark, around, onChange, onClose, defs: null, tr: null, expr: null, list: [], ai: null };
   render();
   panel.hidden = false;
   rememberContext();
   loadDefs(term);
   loadSentence(term, context);
   loadExpression(term, context, mark);
+  loadAI(term, { auto: state.settings.aiAuto });
+}
+
+// ---------- on-device AI explanation (optional, Chrome only) ----------
+async function loadAI(term, { auto, download = false } = {}) {
+  if (!current?.context) return;
+  const status = await aiStatus();
+  if (current?.term !== term) return;
+  if (status === 'unsupported' || status === 'unavailable') { current.ai = null; return renderAI(); }
+  if (!download && (!auto || status !== 'available')) {
+    current.ai = { state: status === 'available' ? 'ready' : 'download' };
+    return renderAI();
+  }
+  current.ai = { state: 'loading' };
+  renderAI();
+  try {
+    const result = await explainInContext({
+      term, sentence: current.context, prev: current.around.prev, next: current.around.next,
+      lang: lang(), native: state.settings.native, langName: langName(lang()), nativeName: langName(state.settings.native),
+      onProgress: (p) => { if (current?.term === term) { current.ai = { state: 'loading', progress: p }; renderAI(); } },
+    });
+    if (current?.term !== term) return;
+    current.ai = result ? { state: 'done', result } : { state: 'error' };
+  } catch {
+    if (current?.term !== term) return;
+    current.ai = { state: 'error' };
+  }
+  renderAI();
+}
+
+function aiHtml() {
+  const ai = current.ai;
+  if (!ai) return '';
+  const label = '<span class="small muted">AI explanation · on-device</span>';
+  if (ai.state === 'ready' || ai.state === 'download') {
+    return `<div class="dict-line">${label}<div class="small">${ai.state === 'download'
+      ? 'Chrome can explain this word in its sentence with its built-in AI (one-time download, then offline and free).'
+      : 'Explain this word in its sentence with Chrome’s built-in AI.'}</div>
+      <button class="btn small" data-act="ai-run">Explain</button></div>`;
+  }
+  if (ai.state === 'loading') {
+    return `<div class="dict-line">${label}<div class="small muted">${ai.progress != null && ai.progress < 1
+      ? `Downloading the model… ${Math.round(ai.progress * 100)}%` : 'Thinking…'}</div></div>`;
+  }
+  if (ai.state === 'error') return `<div class="dict-line">${label}<div class="small muted">The on-device AI couldn’t answer this time.</div></div>`;
+  const r = ai.result;
+  return `<div class="dict-line ai">${label}
+    <div><b dir="auto">${esc(r.gloss_in_context)}</b>
+      <div class="small muted">${esc([r.part_of_speech, r.lemma && r.lemma !== current.term ? `from ${r.lemma}` : ''].filter(Boolean).join(' · '))}</div>
+      ${r.grammar_note ? `<div class="small">${esc(r.grammar_note)}</div>` : ''}
+      ${r.multiword_unit ? `<div class="small">Part of the expression <b dir="auto">${esc(r.multiword_unit)}</b></div>` : ''}</div>
+    <button class="btn small" data-act="ai-hint">Use as hint</button></div>`;
+}
+
+function renderAI() {
+  const el = panel.querySelector('#ai-area');
+  if (el) el.innerHTML = aiHtml();
 }
 
 // Re-render the parts that fill in asynchronously (translation, dictionary, expression).
@@ -171,6 +229,7 @@ function render() {
       ${status !== NEW ? `<button class="btn small" data-s="${NEW}">Reset to new</button>` : ''}
     </div>
     ${sentenceHtml()}
+    <div id="ai-area">${aiHtml()}</div>
     <div class="field" style="margin-top:12px">
       <label for="hint">Your meaning / hint</label>
       <textarea id="hint" rows="2" style="min-height:64px" placeholder="Type a meaning, or tap one below">${esc(w?.hint || '')}</textarea>
@@ -252,6 +311,8 @@ panel.addEventListener('click', (e) => {
   if (t.dataset.act === 'speak') return speak(current.term);
   if (t.dataset.act === 'undo') return undo();
   if (t.dataset.act === 'save-expr') return saveExpression();
+  if (t.dataset.act === 'ai-run') return loadAI(current.term, { auto: true, download: true });
+  if (t.dataset.act === 'ai-hint') return saveHint(current.ai.result.gloss_in_context);
   if (t.dataset.open) return openPanel(t.dataset.open, { context: current.context, onChange: current.onChange, onClose: current.onClose });
   if (t.dataset.s !== undefined) return changeStatus(Number(t.dataset.s));
   if (t.dataset.def !== undefined) return saveHint(current.list[Number(t.dataset.def)].text);

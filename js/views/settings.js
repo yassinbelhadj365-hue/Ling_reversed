@@ -1,6 +1,6 @@
 import * as db from '../db.js';
 import { state, LANGS, lang, saveSettings, loadSettings, loadVocab, toast, download, esc } from '../state.js';
-import { onDeviceStatus, installOnDevice } from '../translate.js';
+import { onDeviceStatus, installOnDevice, aiStatus } from '../translate.js';
 
 const langOptions = (selected) =>
   LANGS.map(([code, name]) => `<option value="${code}" ${code === selected ? 'selected' : ''}>${name}</option>`).join('');
@@ -72,6 +72,16 @@ export async function renderSettings(view) {
     </div>
 
     <div class="card">
+      <h2 style="margin-top:0">AI explanations (on-device)</h2>
+      <p class="small muted">Chrome on a computer can use its built-in AI (Gemini Nano) to explain a word as it’s used in
+        <i>this</i> sentence, with a short grammar note. It runs on your device: free, private and offline after a one-time download.
+        Elsewhere, the free translation and dictionary layers are used.</p>
+      <div class="row"><span class="small">Status:</span> <span id="ai-status" class="small muted">Checking…</span></div>
+      <label class="row"><input type="checkbox" data-bool="aiAuto" ${s.aiAuto ? 'checked' : ''}>
+        Explain automatically when I tap a word (otherwise there’s an Explain button)</label>
+    </div>
+
+    <div class="card">
       <h2 style="margin-top:0">Text to speech</h2>
       <div class="field"><label for="voice">Voice</label><select id="voice"></select></div>
       <div class="field"><label for="ttsRate">Speed: <span id="rateVal">${s.ttsRate}</span>×</label>
@@ -139,6 +149,12 @@ export async function renderSettings(view) {
     showOnDevice();
   });
   showOnDevice();
+  aiStatus().then((st) => {
+    $('#ai-status').textContent = {
+      available: 'Ready ✓', downloadable: 'Available — downloads the first time you tap Explain',
+      downloading: 'Downloading…', unavailable: 'Not available on this device', unsupported: 'Not supported in this browser',
+    }[st] || st;
+  });
   $('#mergeCues').addEventListener('change', (e) => saveSettings({ mergeCues: e.target.checked }));
   $('#ttsRate').addEventListener('input', (e) => { $('#rateVal').textContent = e.target.value; });
   $('#ttsRate').addEventListener('change', (e) => saveSettings({ ttsRate: Number(e.target.value) }));

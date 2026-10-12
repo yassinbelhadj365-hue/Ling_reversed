@@ -189,6 +189,7 @@ try {
   ok(D().querySelector('#word-panel .ctx-tr mark')?.textContent === 'food', 'the matching word is highlighted in the translation');
   await until(() => /de comida/.test(D().querySelector('#word-panel #dict-area')?.textContent || ''));
   ok(/Expression\s*de comida/.test(D().querySelector('#word-panel #dict-area').textContent.replace(/\s+/g, ' ')), 'an expression around the word is detected');
+  ok(!D().querySelector('#word-panel #ai-area').textContent.trim(), 'no on-device AI here → no AI section');
   D().querySelector('#reader .tr-btn[data-tr="2"]').click();
   await until(() => /^\[EN\] La comida/.test(D().querySelector('#reader p[data-i="2"] .tr')?.textContent || ''));
   ok(/^\[EN\] La comida/.test(D().querySelector('#reader p[data-i="2"] .tr')?.textContent || ''), 'line translation button shows the line in English');
@@ -298,9 +299,18 @@ try {
   await until(() => inBand(25));
   ok(inBand(25) && D().getElementById('follow-btn').hidden, '"Follow video" jumps back to the spoken line');
 
+  let aiInput = null;
+  W().__lingoAI = async (input) => { aiInput = input; return {
+    gloss_in_context: 'this (pointing at the sentence)', lemma: 'este', part_of_speech: 'determiner',
+    grammar_note: 'Feminine singular demonstrative.', multiword_unit: null, sentence_translation: 'This is sentence 25.',
+  }; };
   D().querySelector('#reader p[data-i="25"] .w').click();
   await until(() => !D().getElementById('word-panel').hidden);
   ok(!fake.playing, 'tapping a word pauses the video');
+  await until(() => /pointing at the sentence/.test(D().querySelector('#ai-area')?.textContent || ''));
+  ok(/Feminine singular/.test(D().querySelector('#ai-area')?.textContent || ''), 'on-device AI explanation shown with a grammar note');
+  ok(aiInput?.sentence === lines[25] && aiInput.prev === lines[24] && aiInput.next === lines[26], 'AI gets the sentence plus the previous and next lines');
+  delete W().__lingoAI;
   D().querySelector('#word-panel [data-act="close"]').click();
   ok(fake.playing, 'closing the panel resumes it');
 
