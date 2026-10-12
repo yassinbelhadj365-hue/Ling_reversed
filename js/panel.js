@@ -8,21 +8,23 @@ import { progress } from './knowledge.js';
 const UNDO_WINDOW = 10 * 60 * 1000;
 
 const panel = document.getElementById('word-panel');
-let current = null; // {term, context, onChange, defs}
+let current = null; // {term, context, onChange, onClose, defs}
 
 const STATUS_LABEL = { [NEW]: 'New word', 1: 'LingQ · level 1', 2: 'LingQ · level 2', 3: 'LingQ · level 3', 4: 'LingQ · level 4', [KNOWN]: 'Known', [IGNORED]: 'Ignored' };
 
-export function openPanel(term, { context = '', onChange } = {}) {
-  current = { term, context, onChange, defs: null };
+export function openPanel(term, { context = '', onChange, onClose } = {}) {
+  current = { term, context, onChange, onClose, defs: null };
   render();
   panel.hidden = false;
   loadDefs(term);
 }
 
 export function closePanel() {
+  const onClose = current?.onClose;
   panel.hidden = true;
   current = null;
   document.querySelectorAll('.w.active').forEach((n) => n.classList.remove('active'));
+  onClose?.();
 }
 
 export const panelTerm = () => current?.term ?? null;
@@ -138,7 +140,7 @@ panel.addEventListener('click', (e) => {
   if (t.dataset.act === 'close') return closePanel();
   if (t.dataset.act === 'speak') return speak(current.term);
   if (t.dataset.act === 'undo') return undo();
-  if (t.dataset.open) return openPanel(t.dataset.open, { context: current.context, onChange: current.onChange });
+  if (t.dataset.open) return openPanel(t.dataset.open, { context: current.context, onChange: current.onChange, onClose: current.onClose });
   if (t.dataset.s !== undefined) return changeStatus(Number(t.dataset.s));
   if (t.dataset.def !== undefined) return saveHint(current.defs[Number(t.dataset.def)].text);
 });

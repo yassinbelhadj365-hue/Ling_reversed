@@ -158,6 +158,47 @@ textarea { min-height: 160px; resize: vertical; }
 .w.st-4 { background: var(--w-4); }
 .w.in-phrase { text-decoration: underline 2px var(--w-phrase); text-underline-offset: 5px; }
 .w.active { outline: 2px solid var(--w-active); }
+/* ---------- listen mode: the video drives the transcript ---------- */
+#view.listen .media-box {
+  position: sticky; top: var(--topbar-h, 57px); z-index: 15;
+  background: var(--bg); margin: 0 -16px 8px; padding: 6px 16px 8px;
+}
+#view.listen .reader { padding-bottom: 45vh; } /* room to scroll the last line up to the reading spot */
+#view.listen .cue { transition: opacity .2s, background-color .2s; border-radius: 8px; margin: 0 -8px .6em; padding: 2px 8px; }
+#view.listen.dim .reader:has(.playing) .cue:not(.playing) { opacity: .5; }
+#view.listen .cue.playing { opacity: 1; background: var(--surface-2); }
+.follow-bar {
+  position: sticky; z-index: 15; bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom, 0px));
+  display: flex; flex-wrap: wrap; gap: 6px; align-items: center; justify-content: center;
+  margin-top: 8px; padding: 8px; border-radius: var(--radius);
+  background: var(--surface); border: 1px solid var(--border); box-shadow: 0 -4px 16px rgb(0 0 0 / .08);
+}
+.follow-bar .btn.small { min-width: 40px; }
+.follow-toggle { display: inline-flex; gap: 4px; align-items: center; padding: 0 4px; }
+.follow-bar .sync { display: inline-flex; gap: 4px; align-items: center; color: var(--text-2); }
+.follow-more { flex-basis: 100%; display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; align-items: center; }
+.follow-btn {
+  position: fixed; z-index: 25; right: 16px;
+  bottom: calc(var(--tabbar-h) + 80px + env(safe-area-inset-bottom, 0px));
+  box-shadow: 0 4px 16px rgb(0 0 0 / .25);
+}
+body.listen-mode main { max-width: 1200px; }
+@media (min-width: 1100px) {
+  #view.listen { display: grid; grid-template-columns: minmax(0, 45%) minmax(0, 1fr); column-gap: 24px; align-items: start; }
+  #view.listen > * { grid-column: 2; }
+  #view.listen > .reader-head { grid-column: 1 / -1; }
+  #view.listen > .media-box {
+    grid-column: 1; grid-row: 2 / span 5; margin: 0; padding: 0;
+    top: calc(var(--topbar-h, 57px) + 12px);
+  }
+}
+@media (max-width: 720px) {
+  body.listen-mode .panel { max-height: 45vh; }
+}
+@media (max-height: 500px) {
+  #view.listen .media-box { position: static; }
+}
+
 .pager { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
 .legend { display: flex; flex-wrap: wrap; gap: 10px; font-size: .8rem; color: var(--text-2); margin: 8px 0; }
 .legend i { display: inline-block; width: 12px; height: 12px; border-radius: 3px; vertical-align: -1px; margin-right: 4px; border: 1px solid var(--border); }

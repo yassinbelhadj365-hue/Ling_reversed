@@ -50,7 +50,15 @@ function showError(msg) {
 window.addEventListener('error', (e) => showError(e.message));
 window.addEventListener('unhandledrejection', (e) => showError(e.reason?.message || String(e.reason)));
 
+// Sticky elements (the listen-mode player) sit just below the top bar.
+function measureChrome() {
+  const h = document.querySelector('.topbar').offsetHeight;
+  document.documentElement.style.setProperty('--topbar-h', `${h}px`);
+}
+
 async function init() {
+  measureChrome();
+  window.addEventListener('resize', measureChrome);
   await loadSettings();
   await loadVocab();
 

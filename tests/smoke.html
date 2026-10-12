@@ -109,33 +109,32 @@ try {
   sel.value = 'es'; sel.dispatchEvent(new Event('change'));
   await sleep(300);
 
-  W().location.hash = '#/import';
-  await until(() => D().getElementById('text'));
-  D().getElementById('title').value = 'Prueba';
-  D().getElementById('yt').value = 'https://www.youtube.com/watch?v=dQw4w9WgXcQ';
-  const ta = D().getElementById('text');
-  ta.value = `0:00\nHola a todos, bienvenidos al canal.\n0:04\nHoy vamos a hablar de comida.\n0:09\nLa comida española es muy rica.\n`;
-  ta.dispatchEvent(new Event('input'));
-  await until(() => D().getElementById('preview').textContent);
-  ok(/Timed transcript/.test(D().getElementById('preview').textContent), 'import preview: ' + D().getElementById('preview').textContent);
+  async function importLesson(title, text, yt = '') {
+    W().location.hash = '#/import';
+    await until(() => D().getElementById('text'));
+    D().getElementById('title').value = title;
+    D().getElementById('yt').value = yt;
+    const ta = D().getElementById('text');
+    ta.value = text;
+    ta.dispatchEvent(new Event('input'));
+    await until(() => D().getElementById('preview').textContent);
+    const preview = D().getElementById('preview').textContent;
+    D().getElementById('go').click();
+    await until(() => W().location.hash.startsWith('#/lesson/'));
+    await until(() => D().querySelectorAll('#reader .w').length);
+    return preview;
+  }
   const fake = makeFakePlayer();
   W().__lingoFakePlayer = fake.factory;
-  D().getElementById('go').click();
-  await until(() => W().location.hash.startsWith('#/lesson/'));
+
+  // ---- page mode: a timed transcript without media ----
+  const preview = await importLesson('Prueba', `0:00\nHola a todos, bienvenidos al canal.\n0:04\nHoy vamos a hablar de comida.\n0:09\nLa comida española es muy rica.\n`);
+  ok(/Timed transcript/.test(preview), 'import preview: ' + preview);
   ok(W().location.hash.startsWith('#/lesson/'), 'navigated to lesson');
-  await until(() => D().querySelectorAll('#reader .w').length);
   const spans = [...D().querySelectorAll('#reader .w')];
   ok(spans.length === 18, `reader rendered ${spans.length} word spans`);
   ok(spans.every((s) => s.classList.contains('st-0')), 'all words start blue (new)');
-  ok(fake.media?.youtubeId === 'dQw4w9WgXcQ', 'player created for the YouTube video');
-  ok(D().querySelectorAll('.cue-time').length >= 1, 'timestamp buttons shown');
-  fake.set(5, true);
-  await until(() => D().querySelector('#reader p.playing'));
-  ok(D().querySelector('#reader p.playing')?.dataset.i === '1', 'video at 0:05 highlights the line starting at 0:04');
-  fake.set(5, false);
-  D().querySelector('.cue-time[data-t="9"]').click();
-  ok(fake.seeks.at(-1) === 9 && fake.playing, 'timestamp button seeks the player and plays');
-  fake.set(9, false);
+  ok(!D().getElementById('view').classList.contains('listen') && D().querySelector('.pager'), 'no media → page mode');
 
   // click a word, make it LingQ level 2
   const comida = spans.find((s) => s.dataset.n === 'comida');
@@ -211,6 +210,59 @@ try {
   W().location.hash = '#/library';
   await until(() => D().querySelector('.lesson-card'));
   ok(/Prueba/.test(D().querySelector('.lesson-card').textContent), 'lesson in library');
+
+  // ---- listen mode: a YouTube lesson; the video drives the transcript ----
+  const lines = ['El perro corre por el parque.', 'Mi gato duerme todo el día.'];
+  for (let i = 2; i < 40; i++) lines.push(`Esta es la frase número ${i} del vídeo largo.`);
+  const ts = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+  await importLesson('Vídeo', lines.map((l, i) => `${ts(i * 4)}\n${l}`).join('\n'), 'https://www.youtube.com/watch?v=dQw4w9WgXcQ');
+  const V = () => D().getElementById('view');
+  ok(V().classList.contains('listen') && D().querySelector('.follow-bar') && !D().querySelector('.pager'), 'timed lesson with video → listen mode');
+  ok(fake.media?.youtubeId === 'dQw4w9WgXcQ', 'player created for the YouTube video');
+  ok(D().querySelectorAll('.cue-time').length === 40, 'every line has a timestamp button');
+
+  const inBand = (i) => {
+    const p = D().querySelector(`#reader p[data-i="${i}"]`).getBoundingClientRect();
+    const top = D().getElementById('media').getBoundingClientRect().bottom;
+    const bottom = D().querySelector('.follow-bar').getBoundingClientRect().top;
+    return p.top >= top - 2 && p.top <= top + 0.6 * (bottom - top);
+  };
+  fake.set(5, true);
+  await until(() => D().querySelector('#reader p.playing'));
+  ok(D().querySelector('#reader p.playing')?.dataset.i === '1', 'video at 0:05 highlights the line starting at 0:04');
+  fake.set(81);                                    // jump to line 20
+  await until(() => D().querySelector('#reader p.playing')?.dataset.i === '20' && inBand(20));
+  ok(inBand(20), 'after a jump the spoken line is scrolled into the reading spot below the player');
+  fake.set(85); fake.set(89);                      // natural progress to line 22
+  await until(() => D().querySelector('#reader p.playing')?.dataset.i === '22');
+  await sleep(700);                                // smooth scroll
+  ok(inBand(22), 'text keeps up with the video as lines advance');
+
+  D().body.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -200 }));
+  await sleep(50);
+  ok(!D().getElementById('follow-btn').hidden, 'scrolling yourself pauses following and shows "Follow video"');
+  W().scrollTo(0, 0);
+  const y0 = W().scrollY;
+  fake.set(101);                                   // line 25
+  await sleep(400);
+  ok(W().scrollY === y0, 'while paused, the text is not dragged back');
+  D().getElementById('follow-btn').click();
+  await until(() => inBand(25));
+  ok(inBand(25) && D().getElementById('follow-btn').hidden, '"Follow video" jumps back to the spoken line');
+
+  D().querySelector('#reader p[data-i="25"] .w').click();
+  await until(() => !D().getElementById('word-panel').hidden);
+  ok(!fake.playing, 'tapping a word pauses the video');
+  D().querySelector('#word-panel [data-act="close"]').click();
+  ok(fake.playing, 'closing the panel resumes it');
+
+  fake.set(101, false);
+  D().activeElement?.blur();
+  D().dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+  ok(fake.seeks.at(-1) === 104, `→ jumps to the next line (seek ${fake.seeks.at(-1)})`);
+  D().querySelector('[data-ctl="sync+"]').click();
+  ok(D().getElementById('sync-val').textContent === '0.25s', 'sync offset adjusts');
+  fake.set(104, false);
 
   ok(!D().body.dataset.error, 'no runtime errors: ' + (D().body.dataset.error || 'none'));
 } catch (e) {

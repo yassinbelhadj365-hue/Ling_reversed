@@ -23,6 +23,10 @@ const DEFAULTS = {
   autoAdjustManual: true, // evidence keeps moving LingQ levels you set yourself
   listenPasses: 2,     // untapped listens before a new word counts as known
   pagingKnown: true,   // only when autoStatus is off: turning a page marks untapped blue words known
+  follow: true,        // listen mode: the transcript scrolls with playback
+  pauseOnLookup: true, // tapping a word pauses the video...
+  resumeAfterLookup: true, // ...and closing the panel resumes it
+  dimOtherLines: true, // fade lines other than the one being spoken
   dailyGoal: 20,       // LingQs created per day
   ttsRate: 0.9,
   voice: '',

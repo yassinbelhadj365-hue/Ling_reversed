@@ -35,6 +35,14 @@ The machine has no Node, Python, or git — tooling is PowerShell + Edge.
 
 **Tokens are the join key everywhere.** `text.js` `tokenize()` / `normalize()` (NFC, lower-case, curly→straight apostrophe; elision split for fr/it/ca; pure numbers aren't words) produce the `term` used for lesson word counts, reader `data-n` attributes, and vocab keys. Changing tokenization changes word identity — existing lessons' `words` maps and stored vocab would no longer line up.
 
+**Reader layouts** (`js/views/reader.js`):
+- **Page mode:** text lessons, and timed lessons without media. The text is paginated.
+- **Listen mode:** timed lessons with a YouTube or local player. One continuous transcript that follows the player:
+  - An rAF loop on the player clock drives `activeIndex`, and `followTo()` keeps the active line about 30% down the space below the sticky player.
+  - User input (wheel, touchmove, scroll keys) pauses following. The programmatic `scrollBy` never does, because only input events are listened to.
+  - A tap pauses playback (`openPanel({onClose})` resumes it).
+  - Per-lesson `syncOffset` and `lastTime`.
+
 **Lessons** store parsed `segments[{text, start?}]` (`start` in seconds when timed) plus a precomputed `words{term: count}`. `parseAny` auto-detects SRT/VTT (dropping YouTube's rolling-caption duplicates), "0:12"-style pasted YouTube transcripts, or plain text; `mergeCues` joins short cues into sentence-sized chunks, keeping the first timestamp. The reader paginates at render time by `settings.pageSize` words. Turning a page forward (`finishPage`) marks untapped blue words known when `settings.pagingKnown` is on.
 
 **Media sync:** `js/player.js` `createPlayer()` gives the YouTube player and local `<audio>`/`<video>` one interface (`getTime/isPlaying/play/pause/seek/on('state'|'ended')`).

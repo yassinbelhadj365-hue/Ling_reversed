@@ -46,6 +46,17 @@ export async function renderSettings(view) {
     </div>
 
     <div class="card">
+      <h2 style="margin-top:0">Video &amp; audio lessons</h2>
+      <p class="small muted">Lessons with timestamps and a video or audio file show one continuous transcript that moves with playback.</p>
+      ${[
+        ['follow', 'Scroll the transcript with the video (scrolling yourself pauses this)'],
+        ['dimOtherLines', 'Fade the lines that aren’t being spoken'],
+        ['pauseOnLookup', 'Pause the video when I tap a word'],
+        ['resumeAfterLookup', 'Resume when I close the word panel'],
+      ].map(([k, label]) => `<label class="row"><input type="checkbox" data-bool="${k}" ${s[k] ? 'checked' : ''}> ${label}</label>`).join('')}
+    </div>
+
+    <div class="card">
       <h2 style="margin-top:0">Text to speech</h2>
       <div class="field"><label for="voice">Voice</label><select id="voice"></select></div>
       <div class="field"><label for="ttsRate">Speed: <span id="rateVal">${s.ttsRate}</span>×</label>
@@ -89,6 +100,8 @@ export async function renderSettings(view) {
   }));
   $('#listenPasses').addEventListener('change', (e) => saveSettings({ listenPasses: Number(e.target.value) }));
   $('#autoAdjustManual').addEventListener('change', (e) => saveSettings({ autoAdjustManual: e.target.checked }));
+  view.querySelectorAll('[data-bool]').forEach((el) =>
+    el.addEventListener('change', () => saveSettings({ [el.dataset.bool]: el.checked })));
   $('#mergeCues').addEventListener('change', (e) => saveSettings({ mergeCues: e.target.checked }));
   $('#ttsRate').addEventListener('input', (e) => { $('#rateVal').textContent = e.target.value; });
   $('#ttsRate').addEventListener('change', (e) => saveSettings({ ttsRate: Number(e.target.value) }));
