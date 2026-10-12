@@ -183,7 +183,6 @@ textarea { min-height: 160px; resize: vertical; }
   bottom: calc(var(--tabbar-h) + 80px + env(safe-area-inset-bottom, 0px));
   box-shadow: 0 4px 16px rgb(0 0 0 / .25);
 }
-body.listen-mode main { max-width: 1200px; }
 @media (min-width: 1100px) {
   #view.listen { display: grid; grid-template-columns: minmax(0, 45%) minmax(0, 1fr); column-gap: 24px; align-items: start; }
   #view.listen > * { grid-column: 2; }
@@ -193,8 +192,22 @@ body.listen-mode main { max-width: 1200px; }
     top: calc(var(--topbar-h, 57px) + 12px);
   }
 }
+/* Player sizes: large = wider video column; theater = video across the top, transcript below. */
+body.listen-mode main { max-width: 1400px; }
+@media (min-width: 1100px) {
+  #view.listen.size-large { grid-template-columns: minmax(0, 62%) minmax(0, 1fr); }
+  #view.listen.size-theater { display: block; }
+  #view.listen.size-theater > .media-box { padding: 6px 16px 8px; margin: 0 -16px 8px; top: var(--topbar-h, 57px); }
+  #view.listen.size-theater .reader, #view.listen.size-theater .follow-bar,
+  #view.listen.size-theater .legend, #view.listen.size-theater > p { max-width: 900px; margin-left: auto; margin-right: auto; }
+}
+#view.listen.size-theater .media-box iframe,
+#view.listen.size-theater .media-box video { display: block; margin: 0 auto; width: min(100%, calc(55vh * 16 / 9)); }
 @media (max-width: 720px) {
   body.listen-mode .panel { max-height: 45vh; }
+  /* On phones the video is already full width; theater lets it go edge to edge. */
+  #view.listen.size-theater .media-box { margin: 0 -16px 8px; padding: 0 0 6px; }
+  #view.listen.size-theater .media-box iframe { border-radius: 0; width: 100%; }
 }
 @media (max-height: 500px) {
   #view.listen .media-box { position: static; }
@@ -245,8 +258,11 @@ details.assist summary { cursor: pointer; }
 .ctx-block p { margin: 4px 0; }
 .ctx-sentence { font-size: 1rem; }
 .ctx-tr { color: var(--text-2); font-size: .92rem; }
+.reader p.cue { position: relative; padding-right: 30px; }
+#view.listen .reader p.cue { padding-right: 34px; }
 .tr-btn {
-  margin-left: 6px; padding: 0 6px; font-size: .75rem; line-height: 1.6; vertical-align: middle;
+  position: absolute; right: 2px; top: .55em;
+  padding: 0 6px; font-size: .75rem; line-height: 1.6;
   border: 1px solid var(--border); border-radius: 6px; background: transparent; color: var(--text-2); cursor: pointer;
 }
 .reader .tr { display: block; font-size: .95rem; line-height: 1.5; color: var(--text-2); margin-top: 2px; }

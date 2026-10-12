@@ -68,6 +68,7 @@ export async function renderReader(view, id) {
       <button class="btn small primary" data-ctl="toggle" title="Play / pause (Space)">⏯</button>
       <button class="btn small" data-ctl="next" title="Next line (→)">⏭</button>
       <label class="small follow-toggle"><input type="checkbox" id="follow" ${S.follow ? 'checked' : ''}> Follow</label>
+      <button class="btn small" data-ctl="size" title="Player size: normal → large → theater">⤢</button>
       <button class="btn small" data-ctl="more" aria-expanded="false" title="More">⋯</button>
       <button class="btn small" data-ctl="resume" id="resume" hidden></button>
       <div class="follow-more" id="follow-more" hidden>
@@ -90,7 +91,15 @@ export async function renderReader(view, id) {
   view.classList.toggle('listen', listen);
   view.classList.toggle('dim', listen && S.dimOtherLines);
   document.body.classList.toggle('listen-mode', listen);
-  cleanups.push(() => { view.classList.remove('listen', 'dim'); document.body.classList.remove('listen-mode'); });
+  const applySize = () => {
+    for (const s of ['large', 'theater']) view.classList.toggle(`size-${s}`, listen && S.playerSize === s);
+    document.body.classList.toggle('listen-theater', listen && S.playerSize === 'theater');
+  };
+  applySize();
+  cleanups.push(() => {
+    view.classList.remove('listen', 'dim', 'size-large', 'size-theater');
+    document.body.classList.remove('listen-mode', 'listen-theater');
+  });
 
   view.innerHTML = `
     <div class="reader-head">
@@ -288,6 +297,14 @@ export async function renderReader(view, id) {
       else if (name === 'replay') playLine(cur);
       else if (name === 'toggle') player.isPlaying() ? player.pause() : player.play();
       else if (name === 'resume') { $('#resume').hidden = true; seekTo(lesson.lastTime); }
+      else if (name === 'size') {
+        const order = ['normal', 'large', 'theater'];
+        const next = order[(order.indexOf(S.playerSize) + 1) % order.length];
+        saveSettings({ playerSize: next });
+        applySize();
+        toast(`Player: ${next}`, 1500);
+        requestAnimationFrame(() => followTo(activeIdx, true));
+      }
       else if (name === 'more') {
         const more = $('#follow-more');
         more.hidden = !more.hidden;
