@@ -44,6 +44,12 @@ The machine has no Node, Python, or git — tooling is PowerShell + Edge.
   - When playback moves on to the next line naturally (no seek) after ≥60% of a line has played, `onSegmentPassed` sends listen passes for its untapped words, once per line per visit.
   - Per-lesson `syncOffset` and `lastTime`.
 
+**YouTube transcripts:** browsers can't read YouTube captions (CORS), so `serve.ps1` exposes `GET /api/transcript?v=<id>&lang=<code>[&track=<n>]`.
+- It fetches the caption track list from YouTube's InnerTube player API (Android client) and returns the chosen track as WebVTT, as JSON `{ok, title, track, tracks, vtt}` or `{ok:false, error}`.
+- This only exists when the app is served by `serve.ps1`. On static hosting (GitHub Pages) the Import view falls back to copy-paste.
+- It depends on an unofficial YouTube API. If it breaks, the client ID and version in `serve.ps1` are the first thing to check.
+- `parseSubtitles` handles auto-captions: cues are split on timing lines (they contain whitespace-only lines), rolling repeats are dropped, and inline `<hh:mm:ss.mmm>` word times become `marks`.
+
 **Lessons** store parsed `segments[{text, start?}]` (`start` in seconds when timed) plus a precomputed `words{term: count}`. `parseAny` auto-detects SRT/VTT (dropping YouTube's rolling-caption duplicates), "0:12"-style pasted YouTube transcripts, or plain text; `mergeCues` joins short cues into sentence-sized chunks, keeping the first timestamp. The reader paginates at render time by `settings.pageSize` words. Turning a page forward (`finishPage`) marks untapped blue words known when `settings.pagingKnown` is on.
 
 **Media sync:** `js/player.js` `createPlayer()` gives the YouTube player and local `<audio>`/`<video>` one interface (`getTime/isPlaying/play/pause/seek/on('state'|'ended')`).

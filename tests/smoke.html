@@ -63,6 +63,15 @@ try {
   const merged = mergeCues(p2.segments)[0];
   ok(merged.marks?.length === 3 && merged.marks[1][0] === 'hola a todos '.length && merged.marks[2][1] === 3725, 'merged line keeps each cue start as a mark');
   ok(p1.segments[0].end === 3, 'SRT end time kept');
+  const AUTO_VTT = `WEBVTT\nKind: captions\nLanguage: es\n\n` +
+    `00:00:01.000 --> 00:00:03.000 align:start position:0%\n \nHola<00:00:01.500><c> a</c><00:00:02.000><c> todos</c>\n\n` +
+    `00:00:03.000 --> 00:00:03.010 align:start position:0%\nHola a todos\n \n\n` +
+    `00:00:03.010 --> 00:00:05.000 align:start position:0%\nHola a todos\ny<00:00:03.500><c> bienvenidos.</c>\n`;
+  const auto = parseSubtitles(AUTO_VTT);
+  ok(auto.map((c) => c.text).join('|') === 'Hola a todos|y bienvenidos.', 'auto-captions: rolling repeats dropped, inline tags stripped');
+  ok(JSON.stringify(auto[0].marks) === '[[0,1],[5,1.5],[7,2]]', 'auto-captions: word timestamps kept as marks ' + JSON.stringify(auto[0].marks));
+  const am = mergeCues(auto)[0];
+  ok(am.text === 'Hola a todos y bienvenidos.' && JSON.stringify(am.marks.at(-1)) === '[15,3.5]', 'merged auto-captions keep word marks ' + JSON.stringify(am.marks));
   ok(youTubeId('https://youtu.be/dQw4w9WgXcQ?t=3') === 'dQw4w9WgXcQ' && youTubeId('https://www.youtube.com/watch?v=dQw4w9WgXcQ&list=x') === 'dQw4w9WgXcQ', 'YouTube id');
   const g = grade({ status: 1, srs: freshSrs() }, 'good');
   ok(g.status === 2 && g.srs.interval === 1, 'SRS good: level up, 1 day');
@@ -350,6 +359,29 @@ try {
   await playThrough(0, 4.2);
   const corre2 = await db.get('words', 'es|corre');
   ok(corre2?.status === 5, `second untapped listen: "corre" is known (status ${corre2?.status})`);
+
+  // ---- automatic transcript from just a YouTube link (server response stubbed) ----
+  const realFetch = W().fetch;
+  W().fetch = async (url, ...rest) => String(url).startsWith('api/transcript')
+    ? new Response(JSON.stringify({ ok: true, title: 'Vídeo automático', vtt: AUTO_VTT,
+        track: { index: 0, lang: 'es', kind: 'auto', name: 'Spanish (auto-generated)' },
+        tracks: [{ index: 0, lang: 'es', kind: 'auto', name: 'Spanish (auto-generated)' }, { index: 1, lang: 'en', kind: 'manual', name: 'English' }] }),
+        { headers: { 'content-type': 'application/json' } })
+    : realFetch(url, ...rest);
+  W().location.hash = '#/import';
+  await until(() => D().getElementById('yt'));
+  const ytInput = D().getElementById('yt');
+  ytInput.value = 'https://youtu.be/dQw4w9WgXcQ';
+  ytInput.dispatchEvent(new Event('input'));
+  await until(() => /WEBVTT/.test(D().getElementById('text').value));
+  ok(/^✓ Loaded/.test(D().getElementById('yt-status').textContent) && D().getElementById('title').value === 'Vídeo automático',
+    'pasting a link fetches the transcript and title: ' + D().getElementById('yt-status').textContent);
+  ok(!D().getElementById('yt-track').hidden && D().getElementById('yt-track').options.length === 2, 'other caption tracks can be chosen');
+  D().getElementById('go').click();
+  await until(() => V().classList.contains('listen') && D().querySelector('#reader .w'));
+  const autoLesson = await db.get('lessons', Number(W().location.hash.split('/').pop()));
+  ok(autoLesson.segments.length === 1 && autoLesson.segments[0].marks?.length === 5, 'auto-captions became one sentence with word timings');
+  W().fetch = realFetch;
 
   ok(!D().body.dataset.error, 'no runtime errors: ' + (D().body.dataset.error || 'none'));
 } catch (e) {

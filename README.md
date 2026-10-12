@@ -63,9 +63,11 @@ lessons (`freq`), which lessons contain it, how many times you've read past it (
 its status. *Text coverage* = share of all word occurrences in your content that you know —
 a good estimate of how comfortably you can read/listen to it.
 
-**Importing YouTube:** browsers can't fetch YouTube captions directly (CORS), so either copy
-the transcript from YouTube's *Show transcript* panel and paste it, or upload an `.srt`/`.vtt`
-file, and add the video link.
+**Importing YouTube:** paste a video link on the Import screen and the transcript and title load
+automatically, in the language you're studying. You can pick another caption track if there are several.
+Auto-generated captions work too, with per-word timing. This needs the app running from
+**Start Lingo Reader** / `serve.ps1`, because browsers can't read YouTube captions on their own. On a phone or a
+static host, copy the transcript from YouTube's *Show transcript* panel instead, or upload an `.srt`/`.vtt` file.
 
 **Keyboard (desktop):** in the word panel `1`–`4` set level, `K` known, `X` ignore, `Esc`
 close. In review: `Space` reveal, `1`–`4` grade, `K` known.

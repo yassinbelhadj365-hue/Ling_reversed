@@ -20,13 +20,17 @@ export async function renderImport(view) {
     <h1>Import into ${esc(langName(lang()))}</h1>
     <div class="card">
       <div class="field">
-        <label for="title">Title</label>
-        <input id="title" type="text" placeholder="Optional — defaults to the file name or first line">
+        <label for="yt">YouTube link</label>
+        <div class="row" style="flex-wrap:nowrap">
+          <input id="yt" type="url" inputmode="url" placeholder="https://www.youtube.com/watch?v=…">
+          <button class="btn" id="yt-fetch" type="button">Get transcript</button>
+        </div>
+        <span class="small muted" id="yt-status" aria-live="polite">Paste a link and the transcript is fetched automatically.</span>
+        <select id="yt-track" hidden aria-label="Caption track"></select>
       </div>
       <div class="field">
-        <label for="yt">YouTube link (optional)</label>
-        <input id="yt" type="url" inputmode="url" placeholder="https://www.youtube.com/watch?v=…">
-        <span class="small muted">Embeds the video above the transcript; tap a timestamp to jump there.</span>
+        <label for="title">Title</label>
+        <input id="title" type="text" placeholder="Optional — defaults to the video title, file name or first line">
       </div>
       <div class="field">
         <label for="text">Transcript or text</label>
@@ -48,17 +52,68 @@ export async function renderImport(view) {
       <button class="btn primary" id="go">Import</button>
     </div>
     <details class="card">
-      <summary><b>How to get a YouTube transcript</b></summary>
+      <summary><b>Transcript didn’t load?</b></summary>
+      <p class="small">Automatic transcripts work when the app runs from <b>Start Lingo Reader</b> on your computer
+        (browsers can’t read YouTube captions on their own, so the app’s local server fetches them).
+        On a phone or the online version, copy it by hand:</p>
       <ol class="small">
         <li>Open the video on YouTube (desktop browser), click <b>…more</b> under the title, then <b>Show transcript</b>.</li>
-        <li>Select all of the transcript text (timestamps included) and copy it.</li>
-        <li>Paste it in the box above and add the video link — the timestamps keep the text in sync with the video.</li>
+        <li>Select all of the transcript text (timestamps included), copy it, and paste it in the box above.</li>
       </ol>
-      <p class="small muted">You can also download subtitles as .srt/.vtt with a subtitle downloader tool and upload them here.
-        Browsers block websites from fetching YouTube captions directly, which is why a copy-paste or file is needed.</p>
+      <p class="small muted">You can also upload .srt/.vtt subtitle files.</p>
     </details>`;
 
   const $ = (s) => view.querySelector(s);
+
+  // ---------- automatic YouTube transcripts (served by serve.ps1's /api/transcript) ----------
+  const status = (msg) => { $('#yt-status').textContent = msg; };
+  const trackLabel = (t) => `${t.name}${t.kind === 'auto' && !/auto/i.test(t.name) ? ' (auto-generated)' : ''}`;
+  let fetchedFor = null;
+
+  async function fetchTranscript(track = '') {
+    const id = youTubeId($('#yt').value.trim());
+    if (!id) return status('That doesn’t look like a YouTube video link.'), false;
+    status('Getting the transcript…');
+    $('#yt-fetch').disabled = true;
+    let r = null;
+    try {
+      const res = await fetch(`api/transcript?v=${id}&lang=${lang()}${track !== '' ? `&track=${track}` : ''}`);
+      r = res.headers.get('content-type')?.includes('json') ? await res.json() : null;
+    } catch { /* no local server */ }
+    $('#yt-fetch').disabled = false;
+    if (!r) {
+      status('Automatic transcripts need the app running from Start Lingo Reader on your computer. Paste the transcript below instead.');
+      return false;
+    }
+    const sel = $('#yt-track');
+    if (r.tracks?.length) {
+      sel.innerHTML = r.tracks.map((t) => `<option value="${t.index}" ${r.track?.index === t.index ? 'selected' : ''}>${esc(trackLabel(t))}</option>`).join('');
+      if (!r.ok) sel.insertAdjacentHTML('afterbegin', '<option value="" selected>Choose captions…</option>');
+      sel.hidden = r.tracks.length < 2 && r.ok;
+    } else sel.hidden = true;
+    if (!r.ok) {
+      status({
+        'no-track': `This video has no ${langName(lang())} captions. Pick another track below, or switch the app language at the top.`,
+        'no-captions': 'This video has no captions. Paste a transcript or upload subtitles instead.',
+        'network': 'Couldn’t reach YouTube. Check your connection and try again.',
+        'empty': 'YouTube returned empty captions for this track. Try another track.',
+      }[r.error] || 'Couldn’t get the transcript.');
+      return false;
+    }
+    $('#text').value = r.vtt;
+    $('#text').dispatchEvent(new Event('input'));
+    if (!$('#title').value.trim() && r.title) $('#title').value = r.title;
+    fetchedFor = id;
+    status(`✓ Loaded “${trackLabel(r.track)}” captions.${r.track.kind === 'auto' ? ' Auto-generated captions may contain mistakes.' : ''}`);
+    return true;
+  }
+
+  $('#yt-fetch').addEventListener('click', () => fetchTranscript());
+  $('#yt-track').addEventListener('change', (e) => { if (e.target.value !== '') fetchTranscript(e.target.value); });
+  $('#yt').addEventListener('input', () => {
+    const id = youTubeId($('#yt').value.trim());
+    if (id && id !== fetchedFor && !$('#text').value.trim()) fetchTranscript();
+  });
 
   let previewTimer;
   $('#text').addEventListener('input', () => {
@@ -80,6 +135,7 @@ export async function renderImport(view) {
     const ytUrl = $('#yt').value.trim();
     const ytId = youTubeId(ytUrl);
     if (ytUrl && !ytId) return toast('That doesn’t look like a YouTube video link.');
+    if (ytId && !$('#text').value.trim() && !$('#files').files.length && !(await fetchTranscript())) return;
 
     const items = [];
     const text = $('#text').value;
@@ -90,11 +146,7 @@ export async function renderImport(view) {
       const title = items.length === 0 && $('#title').value.trim() ? $('#title').value.trim() : f.name.replace(/\.[^.]+$/, '');
       items.push({ title, raw, filename: f.name });
     }
-    if (!items.length) {
-      return toast(ytId
-        ? 'Paste the transcript too — browsers can’t download YouTube captions directly.'
-        : 'Paste some text or choose a file first.');
-    }
+    if (!items.length) return toast('Paste a YouTube link, some text, or choose a file first.');
 
     btn.disabled = true;
     btn.textContent = 'Importing…';

@@ -72,24 +72,75 @@ function cleanCaption(s) {
     .trim();
 }
 
+// One caption line with YouTube's inline word timestamps
+// ("We're<00:00:19.039><c> no</c>...") -> {text, marks: [[charOffset, time], ...]}.
+// `text` is identical to cleanCaption(raw).
+function captionWithTimes(raw) {
+  let text = '';
+  const marks = [];
+  const re = /<(\d{1,2}:\d{2}:\d{2}[.,]\d{3}|\d{1,2}:\d{2}[.,]\d{3})>|<[^>]*>/g;
+  let last = 0;
+  const add = (piece) => {
+    piece = cleanCaption(`\u0001${piece}\u0001`).slice(1, -1).replace(/\s+/g, ' '); // entities, SSA tags
+    if (text.endsWith(' ') && piece.startsWith(' ')) piece = piece.slice(1);
+    text += piece;
+  };
+  for (const m of raw.matchAll(re)) {
+    add(raw.slice(last, m.index));
+    if (m[1]) marks.push([text.length, parseTime(m[1])]);
+    last = m.index + m[0].length;
+  }
+  add(raw.slice(last));
+  const lead = text.length - text.trimStart().length;
+  text = text.trim();
+  return { text, marks: marks.map(([o, t]) => [Math.min(text.length, Math.max(0, o - lead + (text[o - lead] === ' ' ? 1 : 0))), t]) };
+}
+
 // SRT and WebVTT (including YouTube's auto-generated "rolling" captions, whose
-// cues repeat the previous line — those repeats are dropped).
+// cues repeat the previous line — those repeats are dropped). Inline word
+// timestamps become `marks` so the reader can follow speech word by word.
+// Splits subtitles into cues: [[timingLine, ...textLines], ...]. Cues are delimited by
+// their timing lines, not by blank lines: YouTube's auto-captions put whitespace-only
+// lines inside cues. A cue id (SRT number or VTT id) is the line right before a timing
+// line that follows a blank line, and is dropped.
+function subtitleBlocks(raw) {
+  const lines = raw.replace(/\r/g, '').split('\n');
+  const blocks = [];
+  for (let k = 0; k < lines.length; k++) {
+    if (!lines[k].includes('-->')) {
+      blocks.at(-1)?.push(lines[k]);
+      continue;
+    }
+    const prev = blocks.at(-1);
+    if (prev && prev.length > 1 && lines[k - 1]?.trim() && !lines[k - 2]?.trim()) prev.pop();
+    blocks.push([lines[k]]);
+  }
+  return blocks;
+}
+
 export function parseSubtitles(raw) {
-  const blocks = raw.replace(/\r/g, '').split(/\n\s*\n/);
   const cues = [];
   let prevLines = new Set();
-  for (const block of blocks) {
-    const lines = block.split('\n');
-    const i = lines.findIndex((l) => l.includes('-->'));
-    if (i === -1) continue;
+  for (const lines of subtitleBlocks(raw)) {
+    const i = 0;
     const [left, right = ''] = lines[i].split('-->');
     const start = parseTime(left);
     const end = parseTime(right.trim().split(/\s+/)[0] || '');
-    const textLines = lines.slice(i + 1).map(cleanCaption).filter(Boolean);
-    const fresh = textLines.filter((l) => !prevLines.has(l));
-    prevLines = new Set(textLines);
-    const text = fresh.join(' ').trim();
-    if (text) cues.push(end != null && end > start ? { start, end, text } : { start, text });
+    const textLines = lines.slice(i + 1).map((l) => ({ raw: l, clean: cleanCaption(l) })).filter((l) => l.clean);
+    const fresh = textLines.filter((l) => !prevLines.has(l.clean));
+    prevLines = new Set(textLines.map((l) => l.clean));
+    let text = '';
+    const marks = [[0, start]];
+    for (const l of fresh) {
+      const c = captionWithTimes(l.raw);
+      const off = text ? text.length + 1 : 0;
+      text = text ? `${text} ${c.text}` : c.text;
+      for (const [o, t] of c.marks) if (t > marks.at(-1)[1]) marks.push([off + o, t]);
+    }
+    if (!text) continue;
+    const cue = end != null && end > start ? { start, end, text } : { start, text };
+    if (marks.length > 1) cue.marks = marks;
+    cues.push(cue);
   }
   return cues;
 }
@@ -128,12 +179,14 @@ export function mergeCues(cues, maxChars = 220) {
   for (const cue of cues) {
     const last = out[out.length - 1];
     const lastEnded = last && /[.!?…。？！»"”)]\s*$/.test(last.text);
+    const own = cue.marks || [[0, cue.start]];
     if (last && !lastEnded && last.text.length + cue.text.length < maxChars) {
-      last.marks.push([last.text.length + 1, cue.start]);
+      const off = last.text.length + 1;
+      last.marks.push(...own.map(([o, t]) => [off + o, t]));
       last.text += ' ' + cue.text;
       if (cue.end != null) last.end = cue.end; else delete last.end;
     } else {
-      out.push({ ...cue, marks: [[0, cue.start]] });
+      out.push({ ...cue, marks: own.map((m) => [...m]) });
     }
   }
   for (const seg of out) if (seg.marks.length < 2 || seg.marks.some(([, t]) => t == null)) delete seg.marks;
