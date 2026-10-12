@@ -1,0 +1,173 @@
+// Tokenizing and transcript/subtitle parsing.
+
+// Languages where a short elided article/pronoun is glued on with an apostrophe
+// (l'homme, dell'anno) and should count as its own word.
+const ELISION_LANGS = new Set(['fr', 'it', 'ca']);
+
+const WORD_RE = /[\p{L}\p{M}\p{N}]+(?:['’\-‐][\p{L}\p{M}\p{N}]+)*/gu;
+const ELISION_RE = /aujourd['’]hui|[\p{L}\p{M}]{1,4}['’](?=\p{L})|[\p{L}\p{M}\p{N}]+(?:[\-‐][\p{L}\p{M}\p{N}]+)*/giu;
+const NUMBER_RE = /^[\p{N}]+$/u;
+
+export function normalize(s) {
+  return s.normalize('NFC').replace(/[’‘]/g, "'").replace(/‐/g, '-').toLocaleLowerCase();
+}
+
+// Splits text into tokens: {t: original text, n?: normalized word key}.
+// Tokens without `n` are spaces, punctuation or numbers.
+export function tokenize(text, lang) {
+  const re = ELISION_LANGS.has(lang) ? ELISION_RE : WORD_RE;
+  re.lastIndex = 0;
+  const out = [];
+  let last = 0;
+  for (const m of text.matchAll(re)) {
+    if (m.index > last) out.push({ t: text.slice(last, m.index) });
+    const w = m[0];
+    out.push(NUMBER_RE.test(w) ? { t: w } : { t: w, n: normalize(w) });
+    last = m.index + w.length;
+  }
+  if (last < text.length) out.push({ t: text.slice(last) });
+  return out;
+}
+
+export function countWords(segments, lang) {
+  const counts = {};
+  let total = 0;
+  for (const seg of segments) {
+    for (const tok of tokenize(seg.text, lang)) {
+      if (!tok.n) continue;
+      counts[tok.n] = (counts[tok.n] || 0) + 1;
+      total++;
+    }
+  }
+  return { counts, total };
+}
+
+// ---------- timestamps ----------
+
+// "01:02:03,500", "1:02.5", "02:03" -> seconds
+export function parseTime(s) {
+  const parts = s.trim().replace(',', '.').split(':').map(Number);
+  if (parts.some(Number.isNaN)) return null;
+  return parts.reduce((acc, p) => acc * 60 + p, 0);
+}
+
+export function formatTime(sec) {
+  sec = Math.max(0, Math.floor(sec));
+  const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
+  const mm = h ? String(m).padStart(2, '0') : String(m);
+  return (h ? h + ':' : '') + mm + ':' + String(s).padStart(2, '0');
+}
+
+const TS_LINE = /^\s*\[?((?:\d{1,2}:)?\d{1,2}:\d{2}(?:[.,]\d+)?)\]?\s*$/;
+const TS_INLINE = /^\s*\[?((?:\d{1,2}:)?\d{1,2}:\d{2}(?:[.,]\d+)?)\]?\s+(.+)$/;
+// YouTube's transcript panel sometimes copies an accessibility label like "2 minutes, 5 seconds".
+const DURATION_LABEL = /^\s*\d+\s+(?:seconds?|minutes?|hours?)(?:,\s*\d+\s+(?:seconds?|minutes?|hours?))*\s*$/i;
+
+function cleanCaption(s) {
+  return s
+    .replace(/<[^>]+>/g, '')        // <c>, <i>, inline <00:00:01.000> timestamps
+    .replace(/\{\\[^}]*\}/g, '')    // {\an8} SSA tags
+    .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+// SRT and WebVTT (including YouTube's auto-generated "rolling" captions, whose
+// cues repeat the previous line — those repeats are dropped).
+export function parseSubtitles(raw) {
+  const blocks = raw.replace(/\r/g, '').split(/\n\s*\n/);
+  const cues = [];
+  let prevLines = new Set();
+  for (const block of blocks) {
+    const lines = block.split('\n');
+    const i = lines.findIndex((l) => l.includes('-->'));
+    if (i === -1) continue;
+    const start = parseTime(lines[i].split('-->')[0]);
+    const textLines = lines.slice(i + 1).map(cleanCaption).filter(Boolean);
+    const fresh = textLines.filter((l) => !prevLines.has(l));
+    prevLines = new Set(textLines);
+    const text = fresh.join(' ').trim();
+    if (text) cues.push({ start, text });
+  }
+  return cues;
+}
+
+// Text copied from YouTube's "Show transcript" panel (or any "0:12 text" style transcript).
+export function parseTimestampedText(raw) {
+  const cues = [];
+  let pending = null;
+  for (const line of raw.replace(/\r/g, '').split('\n')) {
+    if (!line.trim() || DURATION_LABEL.test(line)) continue;
+    let m = line.match(TS_LINE);
+    if (m) { pending = parseTime(m[1]); continue; }
+    m = line.match(TS_INLINE);
+    if (m) { cues.push({ start: parseTime(m[1]), text: cleanCaption(m[2]) }); pending = null; continue; }
+    const text = cleanCaption(line);
+    if (!text) continue;
+    if (pending !== null) { cues.push({ start: pending, text }); pending = null; }
+    else if (cues.length) cues[cues.length - 1].text += ' ' + text;
+    else cues.push({ start: 0, text });
+  }
+  return cues;
+}
+
+export function parsePlainText(raw) {
+  const text = raw.replace(/\r/g, '').trim();
+  const byBlank = text.split(/\n\s*\n/);
+  const paras = byBlank.length > 1 ? byBlank : text.split('\n');
+  return paras.map((p) => ({ text: p.replace(/\s*\n\s*/g, ' ').trim() })).filter((p) => p.text);
+}
+
+// Short caption cues read badly one per line; merge them into sentence-sized
+// chunks while keeping the first cue's timestamp so playback still lines up.
+export function mergeCues(cues, maxChars = 220) {
+  const out = [];
+  for (const cue of cues) {
+    const last = out[out.length - 1];
+    const lastEnded = last && /[.!?…。？！»"”)]\s*$/.test(last.text);
+    if (last && !lastEnded && last.text.length + cue.text.length < maxChars) last.text += ' ' + cue.text;
+    else out.push({ ...cue });
+  }
+  return out;
+}
+
+// Detects the format and returns {segments, timed}.
+export function parseAny(raw, filename = '') {
+  const ext = filename.toLowerCase().split('.').pop();
+  if (ext === 'srt' || ext === 'vtt' || /-->/.test(raw)) {
+    const cues = parseSubtitles(raw);
+    if (cues.length) return { segments: cues, timed: true };
+  }
+  const tsLines = raw.split('\n').filter((l) => TS_LINE.test(l) || TS_INLINE.test(l)).length;
+  if (tsLines >= 3) {
+    const cues = parseTimestampedText(raw);
+    if (cues.length) return { segments: cues, timed: true };
+  }
+  return { segments: parsePlainText(raw), timed: false };
+}
+
+export function htmlToText(html) {
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  doc.querySelectorAll('script, style, nav, header, footer, noscript').forEach((n) => n.remove());
+  const blocks = [...doc.querySelectorAll('h1, h2, h3, h4, p, li, blockquote')]
+    .map((n) => n.textContent.replace(/\s+/g, ' ').trim())
+    .filter(Boolean);
+  return blocks.length ? blocks.join('\n\n') : (doc.body?.textContent || '').trim();
+}
+
+export function youTubeId(url) {
+  if (!url) return null;
+  const m = String(url).match(
+    /(?:youtube\.com\/(?:watch\?(?:.*&)?v=|embed\/|shorts\/|live\/)|youtu\.be\/)([A-Za-z0-9_-]{11})/
+  );
+  return m ? m[1] : null;
+}
+
+// The sentence around a word, used as the context line on flashcards.
+export function sentenceAround(text, term) {
+  const sentences = text.match(/[^.!?…。？！]+[.!?…。？！]*/g) || [text];
+  const needle = normalize(term);
+  const hit = sentences.find((s) => normalize(s).includes(needle)) || text;
+  const s = hit.trim();
+  return s.length > 240 ? s.slice(0, 237) + '…' : s;
+}

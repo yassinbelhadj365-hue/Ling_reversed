@@ -1,0 +1,9 @@
+# Personal Claude Code permissions
+.claude/settings.local.json
+
+# OS / editor
+Thumbs.db
+Desktop.ini
+.DS_Store
+.vscode/
+*.log

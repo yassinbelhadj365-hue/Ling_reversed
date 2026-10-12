@@ -1,0 +1,135 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Lingo Reader smoke test</title>
+<pre id="out">running…</pre>
+<iframe id="app" src="../index.html#/library" style="width:1000px;height:800px"></iframe>
+<script type="module">
+import { tokenize, parseAny, mergeCues, youTubeId, parseSubtitles } from '../js/text.js';
+import { grade, freshSrs } from '../js/srs.js';
+
+const log = [];
+let fails = 0;
+const ok = (cond, msg) => { log.push(`${cond ? 'PASS' : 'FAIL'} ${msg}`); if (!cond) fails++; };
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+async function until(fn, ms = 5000) {
+  const t0 = Date.now();
+  while (Date.now() - t0 < ms) { try { const v = fn(); if (v) return v; } catch {} await sleep(50); }
+  return null;
+}
+
+try {
+  // ---- unit: tokenizer / parsers ----
+  ok(tokenize("L'homme d'aujourd'hui", 'fr').filter((t) => t.n).map((t) => t.n).join('|') === "l'|homme|d'|aujourd'hui", 'French elision split');
+  ok(tokenize("I don't know 42 things", 'en').filter((t) => t.n).map((t) => t.n).join('|') === "i|don't|know|things", 'English contraction kept, numbers skipped');
+  ok(tokenize('Привет, мир!', 'ru').filter((t) => t.n).length === 2, 'Cyrillic words');
+  const srt = `1\n00:00:01,000 --> 00:00:03,000\nHola a todos\n\n2\n00:00:03,500 --> 00:00:05,000\n<i>bienvenidos.</i>\n`;
+  const p1 = parseAny(srt, 'a.srt');
+  ok(p1.timed && p1.segments.length === 2 && p1.segments[1].start === 3.5 && p1.segments[1].text === 'bienvenidos.', 'SRT parse');
+  const vtt = `WEBVTT\n\n00:00:00.000 --> 00:00:02.000\nhola amigos\n\n00:00:02.000 --> 00:00:04.000\nhola amigos\nqué tal\n`;
+  ok(parseSubtitles(vtt).map((c) => c.text).join('|') === 'hola amigos|qué tal', 'VTT rolling captions de-duplicated');
+  const yt = `0:00\nhola a todos\n0:03\nhoy vamos a hablar\n1:02:05\nde comida.\n`;
+  const p2 = parseAny(yt);
+  ok(p2.timed && p2.segments.length === 3 && p2.segments[2].start === 3725, 'YouTube transcript paste parse');
+  ok(mergeCues(p2.segments).length === 1, 'Cue merge to sentence');
+  ok(youTubeId('https://youtu.be/dQw4w9WgXcQ?t=3') === 'dQw4w9WgXcQ' && youTubeId('https://www.youtube.com/watch?v=dQw4w9WgXcQ&list=x') === 'dQw4w9WgXcQ', 'YouTube id');
+  const g = grade({ status: 1, srs: freshSrs() }, 'good');
+  ok(g.status === 2 && g.srs.interval === 1, 'SRS good: level up, 1 day');
+  ok(grade({ status: 3, srs: freshSrs() }, 'again').status === 1, 'SRS again: back to level 1');
+
+  // ---- e2e through the real app ----
+  const frame = document.getElementById('app');
+  const W = () => frame.contentWindow;
+  const D = () => frame.contentDocument;
+  await until(() => D().body?.dataset.ready === '1', 8000);
+  ok(D().body.dataset.ready === '1', 'app booted');
+
+  // fresh language for a clean slate
+  const sel = D().getElementById('lang-select');
+  sel.value = 'es'; sel.dispatchEvent(new Event('change'));
+  await sleep(300);
+
+  W().location.hash = '#/import';
+  await until(() => D().getElementById('text'));
+  D().getElementById('title').value = 'Prueba';
+  D().getElementById('yt').value = 'https://www.youtube.com/watch?v=dQw4w9WgXcQ';
+  const ta = D().getElementById('text');
+  ta.value = `0:00\nHola a todos, bienvenidos al canal.\n0:04\nHoy vamos a hablar de comida.\n0:09\nLa comida española es muy rica.\n`;
+  ta.dispatchEvent(new Event('input'));
+  await until(() => D().getElementById('preview').textContent);
+  ok(/Timed transcript/.test(D().getElementById('preview').textContent), 'import preview: ' + D().getElementById('preview').textContent);
+  D().getElementById('go').click();
+  await until(() => W().location.hash.startsWith('#/lesson/'));
+  ok(W().location.hash.startsWith('#/lesson/'), 'navigated to lesson');
+  await until(() => D().querySelectorAll('#reader .w').length);
+  const spans = [...D().querySelectorAll('#reader .w')];
+  ok(spans.length === 18, `reader rendered ${spans.length} word spans`);
+  ok(spans.every((s) => s.classList.contains('st-0')), 'all words start blue (new)');
+  ok(D().querySelector('#media iframe')?.src.includes('dQw4w9WgXcQ'), 'YouTube embedded');
+  ok(D().querySelectorAll('.cue-time').length >= 1, 'timestamp buttons shown');
+
+  // click a word, make it LingQ level 2
+  const comida = spans.find((s) => s.dataset.n === 'comida');
+  comida.click();
+  await until(() => !D().getElementById('word-panel').hidden);
+  ok(D().querySelector('.panel-word').textContent === 'comida', 'panel opened for word');
+  D().querySelector('#word-panel [data-s="2"]').click();
+  await sleep(300);
+  ok([...D().querySelectorAll('#reader .w[data-n="comida"]')].every((s) => s.classList.contains('st-2')), 'both "comida" now LingQ 2 (yellow)');
+  const hint = D().getElementById('hint');
+  hint.value = 'food'; hint.dispatchEvent(new Event('change'));
+  await sleep(200);
+
+  // phrase selection: "muy rica"
+  const muy = D().querySelector('#reader .w[data-n="muy"]');
+  const rica = D().querySelector('#reader .w[data-n="rica"]');
+  const range = D().createRange();
+  range.setStartBefore(muy); range.setEndAfter(rica);
+  W().getSelection().removeAllRanges(); W().getSelection().addRange(range);
+  D().getElementById('reader').dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+  await until(() => D().querySelector('.panel-word')?.textContent === 'muy rica');
+  ok(D().querySelector('.panel-word')?.textContent === 'muy rica', 'phrase panel opened');
+  D().querySelector('#word-panel [data-s="1"]').click();
+  await sleep(300);
+  ok(muy.parentNode && D().querySelector('#reader .w[data-n="muy"]').classList.contains('in-phrase'), 'phrase underlined');
+
+  // complete the lesson: unclicked blue words become known
+  D().querySelector('#word-panel [data-act="close"]').click();
+  D().getElementById('next').click();
+  await until(() => /Lesson complete/.test(D().getElementById('reader').textContent));
+  ok(/Lesson complete/.test(D().getElementById('reader').textContent), 'lesson completed');
+
+  // vocab pool
+  W().location.hash = '#/vocab';
+  await until(() => D().querySelector('.tiles'));
+  const tiles = [...D().querySelectorAll('.tile .v')].map((t) => t.textContent);
+  ok(tiles[1] === '13', `known words after paging: ${tiles[1]} (expect 13 = 16 unique − comida − muy − rica)`);
+  ok(tiles[2] === '2', `LingQs: ${tiles[2]} (comida + "muy rica")`);
+
+  // review
+  W().location.hash = '#/review';
+  await until(() => D().getElementById('show'));
+  ok(!!D().getElementById('show'), 'review card shown');
+  D().getElementById('show').click();
+  await until(() => D().querySelector('[data-g="good"]'));
+  ok(/food|muy rica|comida/.test(D().getElementById('view').textContent), 'card shows the term');
+  D().querySelector('[data-g="good"]').click();
+  await sleep(300);
+
+  // stats
+  W().location.hash = '#/stats';
+  await until(() => D().querySelector('#chart svg g.col'));
+  ok(D().querySelectorAll('#chart svg g.col').length === 30, 'stats chart rendered 30 days');
+  ok(D().querySelectorAll('#chart svg path.bar').length >= 1, 'chart has a bar for today');
+
+  // library
+  W().location.hash = '#/library';
+  await until(() => D().querySelector('.lesson-card'));
+  ok(/Prueba/.test(D().querySelector('.lesson-card').textContent), 'lesson in library');
+
+  ok(!D().body.dataset.error, 'no runtime errors: ' + (D().body.dataset.error || 'none'));
+} catch (e) {
+  ok(false, 'exception: ' + e.stack);
+}
+document.getElementById('out').textContent = `${fails ? 'FAILED ' + fails : 'ALL PASSED'}\n` + log.join('\n');
+document.body.dataset.done = '1';
+</script>
