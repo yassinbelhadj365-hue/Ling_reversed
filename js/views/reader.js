@@ -10,7 +10,8 @@ import {
   state, statusOf, setStatusMany, applyEvents, undoAuto, markSeen, bumpActivity, removeLessonFromPool,
   saveSettings, speak, esc, toast, plural,
 } from '../state.js';
-import { tokenize, formatTime, sentenceAround } from '../text.js';
+import { tokenize, formatTime, sentenceAt } from '../text.js';
+import { translateSentence, ERROR_TEXT } from '../translate.js';
 import { NEW, KNOWN, isLearning } from '../srs.js';
 import { openPanel, closePanel, panelTerm } from '../panel.js';
 import { createPlayer } from '../player.js';
@@ -75,6 +76,7 @@ export async function renderReader(view, id) {
           <span id="sync-val">${(lesson.syncOffset || 0).toFixed(2)}s</span>
           <button class="btn small" data-ctl="sync+" aria-label="Text later">+</button>
         </span>
+        <label class="small follow-toggle"><input type="checkbox" id="auto-tr" ${lesson.showTr ? 'checked' : ''}> Translate the current line</label>
         <button class="btn small" id="next">Finish lesson ✓</button>
       </div>
     </div>
@@ -141,6 +143,10 @@ export async function renderReader(view, id) {
   function setActive(idx) {
     reader.querySelector('p.playing')?.classList.remove('playing');
     reader.querySelector(`p[data-i="${idx}"]`)?.classList.add('playing');
+    if (listen && lesson.showTr) {
+      reader.querySelectorAll('.tr[data-auto]').forEach((b) => b.remove());
+      if (idx >= 0) toggleLineTr(idx, { open: true, auto: true });
+    }
   }
 
   function step() {
@@ -262,6 +268,12 @@ export async function renderReader(view, id) {
     });
 
     $('#follow-btn').addEventListener('click', () => setFollow(true));
+    $('#auto-tr').addEventListener('change', (e) => {
+      lesson.showTr = e.target.checked;
+      db.put('lessons', lesson);
+      reader.querySelectorAll('.tr[data-auto]').forEach((b) => b.remove());
+      if (lesson.showTr && activeIdx >= 0) toggleLineTr(activeIdx, { open: true, auto: true });
+    });
     $('#follow').addEventListener('change', (e) => {
       saveSettings({ follow: e.target.checked });
       setFollow(e.target.checked);
@@ -339,7 +351,8 @@ export async function renderReader(view, id) {
         o += t.t.length;
         return html;
       }).join('');
-      return `<p class="cue" data-i="${i}" dir="auto">${time}${words}</p>`;
+      const tr = `<button class="tr-btn" data-tr="${i}" title="Translate this line" aria-label="Translate this line">⇄</button>`;
+      return `<p class="cue" data-i="${i}" dir="auto">${time}${words}${tr}</p>`;
     }).join('') || '<p class="muted">This lesson is empty.</p>';
     markPhrases();
     if (!listen) {
@@ -393,13 +406,14 @@ export async function renderReader(view, id) {
   function open(term, p, spans) {
     reader.querySelectorAll('.w.active').forEach((n) => n.classList.remove('active'));
     spans.forEach((s) => s.classList.add('active'));
+    // The exact sentence of the occurrence you tapped, with the word's position in it.
     const text = lesson.segments[Number(p.dataset.i)].text;
-    const surface = spans.map((s) => s.textContent).join(' ');
-    openPanel(term, {
-      context: sentenceAround(text, spans.length > 1 ? spans[0].textContent : surface),
-      onChange: refresh,
-      onClose: onPanelClose,
-    });
+    const from = Number(spans[0].dataset.o);
+    const last = spans[spans.length - 1];
+    const to = Number(last.dataset.o) + last.textContent.length;
+    const { sentence, start } = sentenceAt(text, from);
+    const mark = from - start >= 0 && to - start <= sentence.length ? [from - start, to - start] : null;
+    openPanel(term, { context: sentence, mark, onChange: refresh, onClose: onPanelClose });
     if (listen) requestAnimationFrame(() => followTo(activeIdx, true));
   }
 
@@ -428,9 +442,24 @@ export async function renderReader(view, id) {
     if (first && S.autoStatus) track(await applyEvents([{ term, type: 'lookup' }]));
   }
 
+  // Line translations: hidden by default (reading the original is the point), one tap away.
+  async function toggleLineTr(i, { open = false, auto = false } = {}) {
+    const p = reader.querySelector(`p[data-i="${i}"]`);
+    if (!p) return;
+    let box = p.querySelector('.tr');
+    if (box) { if (!open) box.remove(); return; }
+    box = Object.assign(document.createElement('span'), { className: 'tr', dir: 'auto', textContent: 'Translating…' });
+    if (auto) box.dataset.auto = '1';
+    p.append(box);
+    const r = await translateSentence(lesson.segments[i].text, lesson.lang, S.native);
+    box.textContent = r?.text || ERROR_TEXT[r?.error] || ERROR_TEXT.unavailable;
+  }
+
   reader.addEventListener('click', async (e) => {
     const cue = e.target.closest('.cue-time');
     if (cue) { seekTo?.(Number(cue.dataset.t)); return; }
+    const trBtn = e.target.closest('.tr-btn');
+    if (trBtn) { toggleLineTr(Number(trBtn.dataset.tr)); return; }
     const span = e.target.closest('.w');
     if (!span) return;
     if (!getSelection().isCollapsed) return; // a phrase selection is being made

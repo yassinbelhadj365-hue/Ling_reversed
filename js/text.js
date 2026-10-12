@@ -172,6 +172,32 @@ export function youTubeId(url) {
   return m ? m[1] : null;
 }
 
+// The sentence containing the character at `offset` (the word you actually tapped).
+// Text without sentence punctuation (e.g. auto-captions) returns the whole text.
+// -> {sentence, start}: start = index of the sentence's first character in `text`.
+export function sentenceAt(text, offset) {
+  const re = /[^.!?…。？！]+[.!?…。？！]*["'»”)\]]*\s*/g;
+  let m;
+  while ((m = re.exec(text))) {
+    if (offset < m.index + m[0].length || re.lastIndex >= text.length) {
+      const lead = m[0].length - m[0].trimStart().length;
+      return { sentence: m[0].trim(), start: m.index + lead };
+    }
+  }
+  const lead = text.length - text.trimStart().length;
+  return { sentence: text.trim(), start: lead };
+}
+
+// FNV-1a: a short stable hash for cache keys.
+export function hash32(s) {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return (h >>> 0).toString(36);
+}
+
 // The sentence around a word, used as the context line on flashcards.
 export function sentenceAround(text, term) {
   const sentences = text.match(/[^.!?…。？！]+[.!?…。？！]*/g) || [text];

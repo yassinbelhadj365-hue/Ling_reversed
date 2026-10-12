@@ -53,6 +53,11 @@ The machine has no Node, Python, or git — tooling is PowerShell + Edge.
 
 Local audio/video blobs live in the `media` store, keyed by `lessonId`, and are excluded from backups.
 
+**Translation** (`js/translate.js`):
+- `translateSentence()` tries Chrome's on-device `Translator` when the pair is installed, then MyMemory (chunked under 500 bytes; `pickMyMemory` avoids fuzzy matches for other sentences). Results are cached in the `dict` store under `s|from|to|hash32`.
+- The panel gets the exact sentence from `sentenceAt(text, charOffset)`, using the tapped span's `data-o`.
+- Tests stub translation with `window.__lingoTranslate`.
+
 **IndexedDB schema** is in `js/db.js` (`DB_VERSION` 1; stores: lessons, media, words, dict, activity, kv). Schema changes require bumping `DB_VERSION` and handling them in `onupgradeneeded`. `words` and `activity` keys are `"<lang>|<term>"` and `"<YYYY-MM-DD>|<lang>"`.
 
 **Service worker (`sw.js`)** is network-first with cache fallback. **When you add or rename a JS/CSS file, update its `SHELL` list** (and bump `CACHE` for breaking changes), or offline mode will miss the file.

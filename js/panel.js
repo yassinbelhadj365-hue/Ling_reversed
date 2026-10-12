@@ -1,22 +1,69 @@
 // The word/phrase panel: status buttons, your hint, dictionary results.
 // Side sheet on desktop, bottom sheet on phones.
-import { state, lang, getWord, setStatus, undoAuto, speak, esc } from './state.js';
+import { state, lang, getWord, setStatus, saveWord, undoAuto, speak, esc } from './state.js';
 import { lookup, externalLinks } from './dict.js';
 import { NEW, KNOWN, IGNORED, isLearning } from './srs.js';
 import { progress } from './knowledge.js';
+import { translateSentence, sentenceLinks, ERROR_TEXT } from './translate.js';
 
 const UNDO_WINDOW = 10 * 60 * 1000;
 
 const panel = document.getElementById('word-panel');
-let current = null; // {term, context, onChange, onClose, defs}
+// {term, context, mark: [start, end] of the word within context, onChange, onClose, defs, tr}
+let current = null;
 
 const STATUS_LABEL = { [NEW]: 'New word', 1: 'LingQ · level 1', 2: 'LingQ · level 2', 3: 'LingQ · level 3', 4: 'LingQ · level 4', [KNOWN]: 'Known', [IGNORED]: 'Ignored' };
 
-export function openPanel(term, { context = '', onChange, onClose } = {}) {
-  current = { term, context, onChange, onClose, defs: null };
+export function openPanel(term, { context = '', mark = null, onChange, onClose } = {}) {
+  current = { term, context, mark, onChange, onClose, defs: null, tr: null };
   render();
   panel.hidden = false;
+  rememberContext();
   loadDefs(term);
+  loadSentence(term, context);
+}
+
+// LingQs keep the sentence they were met in (and its translation) for flashcards.
+async function rememberContext() {
+  const { term, context, tr } = current;
+  const w = getWord(term);
+  if (!w || !isLearning(w.status) || !context) return;
+  if (!w.context) { w.context = context; w.contextTr = tr?.text || ''; await saveWord(w); }
+  else if (w.context === context && !w.contextTr && tr?.text) { w.contextTr = tr.text; await saveWord(w); }
+}
+
+async function loadSentence(term, context) {
+  if (!context) return;
+  let tr;
+  try { tr = await translateSentence(context, lang(), state.settings.native); } catch { tr = { error: 'unavailable' }; }
+  if (current?.term !== term) return;
+  current.tr = tr || { error: 'unavailable' };
+  const el = panel.querySelector('#ctx-tr');
+  if (el) el.outerHTML = trHtml();
+  rememberContext();
+}
+
+function sentenceHtml() {
+  const { context, mark } = current;
+  if (!context) return '';
+  const body = mark
+    ? `${esc(context.slice(0, mark[0]))}<mark>${esc(context.slice(mark[0], mark[1]))}</mark>${esc(context.slice(mark[1]))}`
+    : esc(context);
+  return `
+    <div class="ctx-block">
+      <div class="small muted">In this sentence</div>
+      <p class="ctx-sentence" dir="auto">${body}</p>
+      ${trHtml()}
+      <p class="small">Open the sentence in ${sentenceLinks(context, lang(), state.settings.native)
+        .map(([name, url]) => `<a href="${esc(url)}" target="_blank" rel="noopener">${name}</a>`).join(' · ')}</p>
+    </div>`;
+}
+
+function trHtml() {
+  const tr = current.tr;
+  if (!tr) return '<p class="ctx-tr muted" id="ctx-tr">Translating…</p>';
+  if (tr.error) return `<p class="ctx-tr muted small" id="ctx-tr">${ERROR_TEXT[tr.error] || ERROR_TEXT.unavailable}</p>`;
+  return `<p class="ctx-tr" id="ctx-tr" dir="auto">${esc(tr.text)} <span class="badge">${esc(tr.source)}</span></p>`;
 }
 
 export function closePanel() {
@@ -30,7 +77,7 @@ export function closePanel() {
 export const panelTerm = () => current?.term ?? null;
 
 function render() {
-  const { term, context } = current;
+  const { term } = current;
   const w = getWord(term);
   const status = w?.status ?? NEW;
   const where = w?.freq
@@ -60,11 +107,11 @@ function render() {
       <button class="btn small" data-s="${IGNORED}" title="Ignore — names, typos (key X)">${status === IGNORED ? 'Ignored' : 'Ignore'}</button>
       ${status !== NEW ? `<button class="btn small" data-s="${NEW}">Reset to new</button>` : ''}
     </div>
+    ${sentenceHtml()}
     <div class="field" style="margin-top:12px">
       <label for="hint">Your meaning / hint</label>
       <textarea id="hint" rows="2" style="min-height:64px" placeholder="Type a meaning, or tap one below">${esc(w?.hint || '')}</textarea>
     </div>
-    ${context ? `<p class="ctx" dir="auto">“${esc(context)}”</p>` : ''}
     ${related.length ? `<p class="small">In phrases: ${related.map((r) => `<button class="btn small" data-open="${esc(r.term)}">${esc(r.term)}</button>`).join(' ')}</p>` : ''}
     <h3 class="small muted">Dictionary</h3>
     <ul class="defs" id="defs">${defsHtml()}</ul>
@@ -130,6 +177,7 @@ function afterChange() {
   if (!current) return;
   const { term, onChange } = current;
   render();
+  rememberContext();
   onChange?.(term);
 }
 

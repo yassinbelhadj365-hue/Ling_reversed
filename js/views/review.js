@@ -51,7 +51,8 @@ export async function renderReview(view) {
         <div><button class="btn small" id="speak">🔊 Listen</button> <span class="badge">LingQ ${w.status}</span></div>
         ${w.context ? `<p class="ctx" dir="auto">${highlight(w.context, w.term)}</p>` : ''}
         ${shown
-          ? `<div class="answer" dir="auto">${w.hint ? esc(w.hint) : '<span class="muted">No hint saved — tap the word in a lesson to add one.</span>'}</div>`
+          ? `<div class="answer" dir="auto">${w.hint ? esc(w.hint) : '<span class="muted">No hint saved — tap the word in a lesson to add one.</span>'}</div>
+             ${w.contextTr ? `<p class="ctx small" dir="auto">${esc(w.contextTr)}</p>` : ''}`
           : '<button class="btn primary" id="show">Show meaning (space)</button>'}
       </div>
       ${shown ? `

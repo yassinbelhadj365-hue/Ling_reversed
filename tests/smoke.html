@@ -4,7 +4,8 @@
 <pre id="out">running…</pre>
 <iframe id="app" src="../index.html#/library" style="width:1000px;height:800px"></iframe>
 <script type="module">
-import { tokenize, parseAny, mergeCues, youTubeId, parseSubtitles } from '../js/text.js';
+import { tokenize, parseAny, mergeCues, youTubeId, parseSubtitles, sentenceAt, hash32 } from '../js/text.js';
+import { chunkForMyMemory, pickMyMemory } from '../js/translate.js';
 import { grade, freshSrs } from '../js/srs.js';
 import { onLookup, onPass, onManual, onReview, undoPatch, computeStatus } from '../js/knowledge.js';
 import { buildTimeline, activeIndex, charAt } from '../js/sync.js';
@@ -94,6 +95,22 @@ try {
   ok(onReview(r, 'again', { status: 1, srs: { interval: 0 } }).status === 1, 'auto: review again → level 1');
   ok(computeStatus({ look: 0, base: 0, pre: 1 }) === 0, 'auto: computeStatus pre < threshold stays new');
 
+  // ---- unit: exact context + translation helpers ----
+  const para = 'Las casas son grandes. Compré la casa ayer. ¿Y tú?';
+  ok(sentenceAt(para, para.indexOf('la casa')).sentence === 'Compré la casa ayer.', 'sentenceAt: the sentence of the tapped occurrence');
+  const sa = sentenceAt(para, para.indexOf('la casa'));
+  ok(para.slice(sa.start, sa.start + 6) === 'Compré', 'sentenceAt: start offset points at the sentence');
+  ok(sentenceAt('sin puntuación aquí nada', 5).sentence === 'sin puntuación aquí nada', 'sentenceAt: no punctuation → whole text');
+  const long = 'palabra '.repeat(120);
+  const chunks = chunkForMyMemory(long, 100);
+  ok(chunks.every((c) => new TextEncoder().encode(c).length <= 100) && chunks.join(' ').split(/\s+/).length === 120, 'chunkForMyMemory: byte limit, no split words');
+  ok(hash32('hola') === hash32('hola') && hash32('hola') !== hash32('Hola'), 'hash32 stable and case-sensitive');
+  const mm = { responseData: { translatedText: "- Today we're going to talk about" }, matches: [
+    { segment: 'Hoy vamos a hablar de', translation: "- Today we're going to talk about", 'created-by': 'MateCat' },
+    { segment: 'Hoy vamos a hablar de comida.', translation: "Today we're going to talk about food.", 'created-by': 'MT!' },
+  ] };
+  ok(pickMyMemory(mm, 'Hoy vamos a hablar de comida.') === "Today we're going to talk about food.", 'MyMemory: fuzzy match for another sentence loses to the machine translation');
+
   // ---- unit: timeline (sync.js) ----
   const tl = buildTimeline([{ text: 'a b', start: 0 }, { text: 'c d', start: 4 }, { text: 'e f', start: 9 }]);
   ok(tl.map((x) => x.end).join() === '4,9,21', 'timeline: ends from next start, last capped');
@@ -130,6 +147,7 @@ try {
   }
   const fake = makeFakePlayer();
   W().__lingoFakePlayer = fake.factory;
+  W().__lingoTranslate = async (text) => ({ text: '[EN] ' + text, source: 'Test' });
 
   // ---- page mode: a timed transcript without media ----
   const preview = await importLesson('Prueba', `0:00\nHola a todos, bienvenidos al canal.\n0:04\nHoy vamos a hablar de comida.\n0:09\nLa comida española es muy rica.\n`);
@@ -148,6 +166,12 @@ try {
   await until(() => D().querySelector('#reader .w[data-n="comida"]').classList.contains('st-1'));
   ok([...D().querySelectorAll('#reader .w[data-n="comida"]')].every((s) => s.classList.contains('st-1')), 'tapping a word made it LingQ 1 automatically');
   ok(/Auto/.test(D().querySelector('#word-panel .auto-line')?.textContent || ''), 'panel shows the automatic-level line');
+  ok(D().querySelector('#word-panel .ctx-sentence mark')?.textContent === 'comida', 'panel marks the tapped word in its sentence');
+  await until(() => /^\[EN\]/.test(D().querySelector('#word-panel .ctx-tr')?.textContent || ''));
+  ok(/^\[EN\] Hoy vamos a hablar de comida\./.test(D().querySelector('#word-panel .ctx-tr')?.textContent || ''), 'panel translates the exact sentence: ' + D().querySelector('#word-panel .ctx-tr')?.textContent);
+  D().querySelector('#reader .tr-btn[data-tr="2"]').click();
+  await until(() => /^\[EN\] La comida/.test(D().querySelector('#reader p[data-i="2"] .tr')?.textContent || ''));
+  ok(/^\[EN\] La comida/.test(D().querySelector('#reader p[data-i="2"] .tr')?.textContent || ''), 'line translation button shows the line in English');
   D().querySelector('#word-panel [data-s="2"]').click();
   await sleep(300);
   ok([...D().querySelectorAll('#reader .w[data-n="comida"]')].every((s) => s.classList.contains('st-2')), 'both "comida" now LingQ 2 (yellow)');

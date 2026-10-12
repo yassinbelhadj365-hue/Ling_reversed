@@ -1,5 +1,6 @@
 import * as db from '../db.js';
 import { state, LANGS, lang, saveSettings, loadSettings, loadVocab, toast, download, esc } from '../state.js';
+import { onDeviceStatus, installOnDevice } from '../translate.js';
 
 const langOptions = (selected) =>
   LANGS.map(([code, name]) => `<option value="${code}" ${code === selected ? 'selected' : ''}>${name}</option>`).join('');
@@ -58,6 +59,19 @@ export async function renderSettings(view) {
     </div>
 
     <div class="card">
+      <h2 style="margin-top:0">Translation</h2>
+      <p class="small muted">Tapping a word translates the whole sentence it’s in, so you see what it means <i>here</i>.</p>
+      <div class="field"><label>On-device translator (Chrome on a computer)</label>
+        <div class="row"><span id="od-status" class="small muted">Checking…</span>
+          <button class="btn small" id="od-install" hidden>Download</button></div>
+        <span class="small muted">Private, offline and unlimited. Other browsers and phones use MyMemory, a free online service.</span></div>
+      <div class="field"><label for="translateEmail">Email for MyMemory (optional)</label>
+        <input id="translateEmail" type="text" inputmode="email" autocomplete="email" value="${esc(s.translateEmail)}" placeholder="Leave empty to stay anonymous">
+        <span class="small muted">MyMemory allows roughly 50 sentences a day without an email and about 10× more with one.
+          The email is sent to MyMemory with each request; nothing else is.</span></div>
+    </div>
+
+    <div class="card">
       <h2 style="margin-top:0">Text to speech</h2>
       <div class="field"><label for="voice">Voice</label><select id="voice"></select></div>
       <div class="field"><label for="ttsRate">Speed: <span id="rateVal">${s.ttsRate}</span>×</label>
@@ -103,6 +117,28 @@ export async function renderSettings(view) {
   $('#autoAdjustManual').addEventListener('change', (e) => saveSettings({ autoAdjustManual: e.target.checked }));
   view.querySelectorAll('[data-bool]').forEach((el) =>
     el.addEventListener('change', () => saveSettings({ [el.dataset.bool]: el.checked })));
+  $('#translateEmail').addEventListener('change', (e) => saveSettings({ translateEmail: e.target.value.trim() }).then(() => toast('Saved')));
+
+  const OD_TEXT = {
+    available: 'Ready ✓', downloadable: 'Available to download', downloading: 'Downloading…',
+    unavailable: 'Not available for this language pair', unsupported: 'Not supported in this browser',
+  };
+  async function showOnDevice() {
+    const st = await onDeviceStatus(lang(), state.settings.native);
+    $('#od-status').textContent = OD_TEXT[st] || st;
+    $('#od-install').hidden = st !== 'downloadable';
+  }
+  $('#od-install').addEventListener('click', async () => {
+    $('#od-install').disabled = true;
+    try {
+      await installOnDevice(lang(), state.settings.native, (p) => { $('#od-status').textContent = `Downloading… ${Math.round(p * 100)}%`; });
+    } catch (err) {
+      toast(`Download failed: ${err.message}`, 5000);
+    }
+    $('#od-install').disabled = false;
+    showOnDevice();
+  });
+  showOnDevice();
   $('#mergeCues').addEventListener('change', (e) => saveSettings({ mergeCues: e.target.checked }));
   $('#ttsRate').addEventListener('input', (e) => { $('#rateVal').textContent = e.target.value; });
   $('#ttsRate').addEventListener('change', (e) => saveSettings({ ttsRate: Number(e.target.value) }));

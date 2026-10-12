@@ -28,6 +28,7 @@ const DEFAULTS = {
   resumeAfterLookup: true, // ...and closing the panel resumes it
   dimOtherLines: true, // fade lines other than the one being spoken
   wordProgress: true,  // underline the words of the active line as they are spoken
+  translateEmail: '',  // optional: sent to MyMemory to raise its free daily translation limit
   dailyGoal: 20,       // LingQs created per day
   ttsRate: 0.9,
   voice: '',

@@ -11,7 +11,7 @@ function stripHtml(html) {
   return div.textContent.replace(/\s+/g, ' ').trim();
 }
 
-async function fetchJson(url, ms = 8000) {
+export async function fetchJson(url, ms = 8000) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), ms);
   try {

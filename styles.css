@@ -231,6 +231,15 @@ body.listen-mode main { max-width: 1200px; }
 .defs li:hover { border-color: var(--accent); }
 .defs li .pos { font-size: .75rem; color: var(--text-2); display: block; }
 .ctx { font-style: italic; color: var(--text-2); font-size: .9rem; }
+.ctx-block { margin: 12px 0 4px; padding: 10px 12px; border-radius: 10px; background: var(--surface-2); }
+.ctx-block p { margin: 4px 0; }
+.ctx-sentence { font-size: 1rem; }
+.ctx-tr { color: var(--text-2); font-size: .92rem; }
+.tr-btn {
+  margin-left: 6px; padding: 0 6px; font-size: .75rem; line-height: 1.6; vertical-align: middle;
+  border: 1px solid var(--border); border-radius: 6px; background: transparent; color: var(--text-2); cursor: pointer;
+}
+.reader .tr { display: block; font-size: .95rem; line-height: 1.5; color: var(--text-2); margin-top: 2px; }
 
 /* ---------- review ---------- */
 .flash { text-align: center; padding: 32px 16px; min-height: 260px; display: flex; flex-direction: column; justify-content: center; gap: 12px; }
