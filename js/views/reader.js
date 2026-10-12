@@ -14,7 +14,7 @@ import { tokenize, formatTime, sentenceAround } from '../text.js';
 import { NEW, KNOWN, isLearning } from '../srs.js';
 import { openPanel, closePanel, panelTerm } from '../panel.js';
 import { createPlayer } from '../player.js';
-import { buildTimeline, activeIndex } from '../sync.js';
+import { buildTimeline, activeIndex, charAt } from '../sync.js';
 
 const SYNC_STEP = 0.25;          // seconds per sync-offset click
 const JUMP_BACK = -0.3;          // clock moving back more than this = a seek
@@ -159,12 +159,27 @@ export async function renderReader(view, id) {
       activePos = pos;
       segPlayed = 0;
       setActive(idx);
+      reader.querySelectorAll('.w.spoken').forEach((s) => s.classList.remove('spoken'));
+      spokenUpTo = -1;
       if (listen) {
         if (!following && Date.now() - lastUserScroll > REFOLLOW_AFTER_MS) setFollow(true, false);
         followTo(idx, jump || Math.abs(pos - prevPos) > 1);
       }
     }
+    if (listen && S.wordProgress && activePos >= 0) markSpoken(t);
     lastT = t;
+  }
+
+  // Underline the words of the active line that have been spoken so far
+  // (interpolated between caption marks, so approximate).
+  let spokenUpTo = -1;
+  function markSpoken(t) {
+    const entry = timeline[activePos];
+    const c = charAt(lesson.segments[entry.i], entry, t);
+    if (c === spokenUpTo) return;
+    spokenUpTo = c;
+    const p = reader.querySelector(`p[data-i="${entry.i}"]`);
+    p?.querySelectorAll('.w').forEach((s) => s.classList.toggle('spoken', Number(s.dataset.o) < c));
   }
 
   function tick() {
@@ -318,9 +333,12 @@ export async function renderReader(view, id) {
       const time = timed && player && seg.start != null
         ? `<button class="cue-time" data-t="${seg.start}" title="Play from here">▶ ${formatTime(seg.start)}</button>`
         : '';
-      const words = tokenize(seg.text, lesson.lang)
-        .map((t) => (t.n ? `<span class="w ${statusClass(t.n)}" data-n="${esc(t.n)}">${esc(t.t)}</span>` : esc(t.t)))
-        .join('');
+      let o = 0; // character offset of each word, for word-by-word progress
+      const words = tokenize(seg.text, lesson.lang).map((t) => {
+        const html = t.n ? `<span class="w ${statusClass(t.n)}" data-n="${esc(t.n)}" data-o="${o}">${esc(t.t)}</span>` : esc(t.t);
+        o += t.t.length;
+        return html;
+      }).join('');
       return `<p class="cue" data-i="${i}" dir="auto">${time}${words}</p>`;
     }).join('') || '<p class="muted">This lesson is empty.</p>';
     markPhrases();

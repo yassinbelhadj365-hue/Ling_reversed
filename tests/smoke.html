@@ -57,6 +57,9 @@ try {
   const p2 = parseAny(yt);
   ok(p2.timed && p2.segments.length === 3 && p2.segments[2].start === 3725, 'YouTube transcript paste parse');
   ok(mergeCues(p2.segments).length === 1, 'Cue merge to sentence');
+  const merged = mergeCues(p2.segments)[0];
+  ok(merged.marks?.length === 3 && merged.marks[1][0] === 'hola a todos '.length && merged.marks[2][1] === 3725, 'merged line keeps each cue start as a mark');
+  ok(p1.segments[0].end === 3, 'SRT end time kept');
   ok(youTubeId('https://youtu.be/dQw4w9WgXcQ?t=3') === 'dQw4w9WgXcQ' && youTubeId('https://www.youtube.com/watch?v=dQw4w9WgXcQ&list=x') === 'dQw4w9WgXcQ', 'YouTube id');
   const g = grade({ status: 1, srs: freshSrs() }, 'good');
   ok(g.status === 2 && g.srs.interval === 1, 'SRS good: level up, 1 day');
@@ -264,6 +267,13 @@ try {
   D().querySelector('[data-ctl="sync+"]').click();
   ok(D().getElementById('sync-val').textContent === '0.25s', 'sync offset adjusts');
   fake.set(104, false);
+
+  // word-by-word progress: halfway through line 30 (4 s long), the first words are underlined, the last isn't
+  fake.set(30 * 4 + 2 - 0.25, true);
+  await until(() => D().querySelector('#reader p[data-i="30"] .w.spoken'));
+  const l30 = [...D().querySelectorAll('#reader p[data-i="30"] .w')];
+  ok(l30[0].classList.contains('spoken') && !l30.at(-1).classList.contains('spoken'), 'words of the spoken line are underlined progressively');
+  fake.set(fake.t, false);
 
   // listening to a line all the way through is evidence for its untapped words
   async function playThrough(from, to) {

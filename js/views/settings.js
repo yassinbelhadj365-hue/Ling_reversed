@@ -51,6 +51,7 @@ export async function renderSettings(view) {
       ${[
         ['follow', 'Scroll the transcript with the video (scrolling yourself pauses this)'],
         ['dimOtherLines', 'Fade the lines that aren’t being spoken'],
+        ['wordProgress', 'Underline words as they are spoken (approximate)'],
         ['pauseOnLookup', 'Pause the video when I tap a word'],
         ['resumeAfterLookup', 'Resume when I close the word panel'],
       ].map(([k, label]) => `<label class="row"><input type="checkbox" data-bool="${k}" ${s[k] ? 'checked' : ''}> ${label}</label>`).join('')}

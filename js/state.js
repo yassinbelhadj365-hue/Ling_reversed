@@ -27,6 +27,7 @@ const DEFAULTS = {
   pauseOnLookup: true, // tapping a word pauses the video...
   resumeAfterLookup: true, // ...and closing the panel resumes it
   dimOtherLines: true, // fade lines other than the one being spoken
+  wordProgress: true,  // underline the words of the active line as they are spoken
   dailyGoal: 20,       // LingQs created per day
   ttsRate: 0.9,
   voice: '',

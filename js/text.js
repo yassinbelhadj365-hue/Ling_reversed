@@ -82,12 +82,14 @@ export function parseSubtitles(raw) {
     const lines = block.split('\n');
     const i = lines.findIndex((l) => l.includes('-->'));
     if (i === -1) continue;
-    const start = parseTime(lines[i].split('-->')[0]);
+    const [left, right = ''] = lines[i].split('-->');
+    const start = parseTime(left);
+    const end = parseTime(right.trim().split(/\s+/)[0] || '');
     const textLines = lines.slice(i + 1).map(cleanCaption).filter(Boolean);
     const fresh = textLines.filter((l) => !prevLines.has(l));
     prevLines = new Set(textLines);
     const text = fresh.join(' ').trim();
-    if (text) cues.push({ start, text });
+    if (text) cues.push(end != null && end > start ? { start, end, text } : { start, text });
   }
   return cues;
 }
@@ -119,15 +121,22 @@ export function parsePlainText(raw) {
 }
 
 // Short caption cues read badly one per line; merge them into sentence-sized
-// chunks while keeping the first cue's timestamp so playback still lines up.
+// chunks. Each merged line keeps `marks` ([[charOffset, start], ...]) so the
+// reader can still tell which part of the line is being spoken.
 export function mergeCues(cues, maxChars = 220) {
   const out = [];
   for (const cue of cues) {
     const last = out[out.length - 1];
     const lastEnded = last && /[.!?…。？！»"”)]\s*$/.test(last.text);
-    if (last && !lastEnded && last.text.length + cue.text.length < maxChars) last.text += ' ' + cue.text;
-    else out.push({ ...cue });
+    if (last && !lastEnded && last.text.length + cue.text.length < maxChars) {
+      last.marks.push([last.text.length + 1, cue.start]);
+      last.text += ' ' + cue.text;
+      if (cue.end != null) last.end = cue.end; else delete last.end;
+    } else {
+      out.push({ ...cue, marks: [[0, cue.start]] });
+    }
   }
+  for (const seg of out) if (seg.marks.length < 2 || seg.marks.some(([, t]) => t == null)) delete seg.marks;
   return out;
 }
 
