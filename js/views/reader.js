@@ -18,6 +18,7 @@ import { createPlayer } from '../player.js';
 import { buildTimeline, activeIndex, charAt } from '../sync.js';
 import { fetchYouTubeAudio, decodeAudio, transcribe, progressText, AUDIO_ERRORS } from '../asr.js';
 import { checkTranscript } from '../check.js';
+import { fetchLessonMedia } from '../cloud.js';
 
 const SYNC_STEP = 0.25;          // seconds per sync-offset click
 const JUMP_BACK = -0.3;          // clock moving back more than this = a seek
@@ -45,7 +46,7 @@ function statusClass(term) {
 }
 
 export async function renderReader(view, id) {
-  const lesson = await db.get('lessons', Number(id));
+  const lesson = await db.get('lessons', decodeURIComponent(id || ''));
   if (!lesson) {
     view.innerHTML = '<div class="empty">This lesson no longer exists. <a href="#/library">Back to library</a></div>';
     return;
@@ -53,7 +54,8 @@ export async function renderReader(view, id) {
   lesson.openedAt = Date.now();
   await db.put('lessons', lesson);
 
-  const media = await db.get('media', lesson.id);
+  // Audio/video files sync separately; fetch this lesson's from the cloud if needed.
+  const media = (await db.get('media', lesson.id)) || (lesson.hasMedia ? await fetchLessonMedia(lesson.id) : null);
   const timed = lesson.segments.some((s) => s.start != null);
   const hasMedia = !!(lesson.youtubeId || media?.blob);
   const listen = timed && hasMedia;

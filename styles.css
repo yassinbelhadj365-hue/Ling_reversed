@@ -68,7 +68,22 @@ button, input, select, textarea { font: inherit; color: inherit; }
 }
 .brand { font-weight: 700; font-size: 1.15rem; text-decoration: none; color: var(--text); }
 .brand span { color: var(--accent); }
-.topbar select { width: auto; max-width: 50%; min-width: 140px; }
+.topbar select { width: auto; max-width: 150px; min-width: 110px; }
+.topbar-right { display: flex; align-items: center; gap: 8px; min-width: 0; }
+#account-btn {
+  display: inline-flex; align-items: center; gap: 6px; max-width: 140px; padding: 6px 10px; border-radius: 999px;
+  border: 1px solid var(--border); color: var(--text); text-decoration: none; font-size: .85rem;
+}
+#account-btn .acc-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.acc-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-2); flex: none; }
+#account-btn[data-sync="ok"] .acc-dot { background: var(--good); }
+#account-btn[data-sync="syncing"] .acc-dot { background: var(--accent); }
+#account-btn[data-sync="error"] .acc-dot, #account-btn[data-sync="offline"] .acc-dot { background: var(--danger); }
+#account-btn[data-sync="none"] .acc-dot { background: transparent; border: 1px solid var(--text-2); }
+.acc-list { display: flex; flex-direction: column; gap: 8px; }
+.acc-row { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 8px 10px; border: 1px solid var(--border); border-radius: 10px; }
+.acc-row.on { border-color: var(--accent); }
 mark { background: var(--w-1); color: inherit; border-radius: 3px; padding: 0 2px; }
 
 .tabbar {

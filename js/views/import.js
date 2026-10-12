@@ -1,4 +1,5 @@
 import * as db from '../db.js';
+import { newLessonId } from '../db.js';
 import { state, lang, langName, statusOf, addLessonToPool, esc, toast, plural } from '../state.js';
 import { parseAny, mergeCues, countWords, htmlToText, youTubeId } from '../text.js';
 import { fetchYouTubeAudio, decodeAudio, transcribe, toVtt, progressText, AUDIO_ERRORS } from '../asr.js';
@@ -164,6 +165,7 @@ export async function renderImport(view) {
   $('#text').addEventListener('input', () => {
     clearTimeout(previewTimer);
     previewTimer = setTimeout(() => {
+      if (!$('#text')) return; // the import screen was left in the meantime
       const raw = $('#text').value;
       if (!raw.trim()) return ($('#preview').textContent = '');
       const p = prepare(raw, '', $('#merge').checked);
@@ -208,11 +210,14 @@ export async function renderImport(view) {
           segments: p.segments, words: p.counts, wordCount: p.total,
           createdAt: Date.now(), openedAt: 0, page: 0, completed: false,
         };
-        lesson.id = await db.put('lessons', lesson);
-        newWords += await addLessonToPool(lesson);
-        if (i === 0 && mediaFile && !ytId) {
-          await db.put('media', { lessonId: lesson.id, blob: mediaFile, type: mediaFile.type });
+        lesson.id = newLessonId();
+        const withMedia = i === 0 && mediaFile && !ytId;
+        if (withMedia) {
+          lesson.hasMedia = true;
+          await db.put('media', { lessonId: lesson.id, blob: mediaFile, type: mediaFile.type, updatedAt: Date.now() });
         }
+        await db.put('lessons', lesson);
+        newWords += await addLessonToPool(lesson);
         lastId = lesson.id;
         made++;
       }

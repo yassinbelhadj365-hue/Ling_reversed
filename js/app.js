@@ -7,8 +7,12 @@ import { renderReview } from './views/review.js';
 import { renderVocab } from './views/vocab.js';
 import { renderStats } from './views/stats.js';
 import { renderSettings } from './views/settings.js';
+import { renderAccount } from './views/account.js';
+import * as db from './db.js';
+import { activeAccount, startSync, onStatus } from './cloud.js';
 
 const VIEWS = {
+  account: renderAccount,
   library: renderLibrary,
   import: renderImport,
   lesson: renderReader,
@@ -56,11 +60,41 @@ function measureChrome() {
   document.documentElement.style.setProperty('--topbar-h', `${h}px`);
 }
 
+// Top-bar account button: name + a sync dot.
+function showAccount(st) {
+  const acc = activeAccount();
+  const btn = document.getElementById('account-btn');
+  btn.querySelector('.acc-name').textContent = acc ? acc.name : 'Guest';
+  btn.dataset.sync = acc ? st?.state || 'off' : 'none';
+  btn.title = acc ? `${acc.email} — ${st?.state === 'ok' ? 'synced' : st?.state || ''}${st?.error ? `: ${st.error}` : ''}` : 'Not synced — tap to create an account';
+}
+
 async function init() {
   measureChrome();
   window.addEventListener('resize', measureChrome);
+  const account = activeAccount();
+  db.useDatabase(account?.id || null); // each account has its own local database
   await loadSettings();
   await loadVocab();
+  showAccount();
+  onStatus(showAccount);
+  if (account) {
+    // Get other devices' changes before showing anything (but don't wait long when offline).
+    await Promise.race([
+      startSync({
+        onRemoteChange: async () => {
+          await loadSettings();
+          await loadVocab();
+          const name = location.hash.split('/')[1];
+          if (['lesson', 'import', 'review'].includes(name)) toast('Synced changes from your other device');
+          else route();
+        },
+      }),
+      new Promise((r) => setTimeout(r, 4000)),
+    ]);
+    await loadSettings();
+    await loadVocab();
+  }
 
   langSelect.innerHTML = LANGS.map(([code, name]) => `<option value="${code}">${name}</option>`).join('');
   langSelect.value = lang();

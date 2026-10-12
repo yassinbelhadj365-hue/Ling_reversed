@@ -445,14 +445,14 @@ try {
 
   // ---- correcting a transcript line updates the lesson and the word pool ----
   const videoId = W().location.hash.split('/').pop();
-  const before = await db.get('lessons', Number(videoId));
+  const before = await db.get('lessons', videoId);
   const largoBefore = before.words['largo'];
   D().querySelector('#reader [data-edit="39"]').click();
   const ta39 = await until(() => D().querySelector('#reader p[data-i="39"] textarea'));
   ta39.value = 'Esta es la frase número 39 del vídeo corto.';
   D().querySelector('#reader p[data-i="39"] [data-save]').click();
   await until(() => D().querySelector('#reader p[data-i="39"] .w[data-n="corto"]'));
-  const after = await db.get('lessons', Number(videoId));
+  const after = await db.get('lessons', videoId);
   const corto = await db.get('words', 'es|corto');
   ok(after.segments[39].text.endsWith('vídeo corto.') && after.words['corto'] === 1 && after.words['largo'] === largoBefore - 1,
     'edited line saved and lesson word counts updated');
@@ -483,7 +483,7 @@ try {
   await until(() => D().querySelector('#word-panel .flag-box'));
   D().querySelector('#word-panel [data-act="flag-replace"]').click();
   await until(() => !D().querySelector('#reader .w[data-flag]'));
-  const fixed = await db.get('lessons', Number(videoId));
+  const fixed = await db.get('lessons', videoId);
   ok(fixed.segments[2].text === 'Esta es la frase número 2 del video largo.' && !fixed.flags[2], 'Replace corrects the transcript and clears the flag');
   W().fetch = realFetch0;
   delete W().__lingoASR;
@@ -498,7 +498,7 @@ try {
   ok(/Selected text/.test(D().querySelector('#word-panel').textContent), 'selecting across lines opens the selected-text panel');
   D().querySelector('#word-panel [data-act="flag-wrong"]').click();
   await until(() => D().querySelector('#reader p[data-i="6"] .w[data-flag]'));
-  const manual = await db.get('lessons', Number(videoId));
+  const manual = await db.get('lessons', videoId);
   ok(manual.flags[5]?.[0].manual && manual.flags[5][0].said === 'frase número 5 del vídeo largo' && manual.flags[6]?.[0].said === 'Esta es',
     'flag as wrong marks the selected text on both lines ' + JSON.stringify([manual.flags[5], manual.flags[6]]));
 
@@ -521,7 +521,7 @@ try {
   ok(!D().getElementById('yt-track').hidden && D().getElementById('yt-track').options.length === 2, 'other caption tracks can be chosen');
   D().getElementById('go').click();
   await until(() => V().classList.contains('listen') && D().querySelector('#reader .w'));
-  const autoLesson = await db.get('lessons', Number(W().location.hash.split('/').pop()));
+  const autoLesson = await db.get('lessons', W().location.hash.split('/').pop());
   ok(autoLesson.segments.length === 1 && autoLesson.segments[0].marks?.length === 5, 'auto-captions became one sentence with word timings');
   W().fetch = realFetch;
 
@@ -552,10 +552,125 @@ try {
   ok(/00:00:02\.000 --> 00:00:04\.000\nLa inteligencia artificial escribe\./.test(D().getElementById('text').value), 'AI transcript is timed (WebVTT)');
   D().getElementById('go').click();
   await until(() => V().classList.contains('listen') && /inteligencia/.test(D().getElementById('reader').textContent));
-  const asrLesson = await db.get('lessons', Number(W().location.hash.split('/').pop()));
+  const asrLesson = await db.get('lessons', W().location.hash.split('/').pop());
   ok(asrLesson.asr === true && asrLesson.segments.length === 2, 'lesson remembers it was transcribed by AI');
   W().fetch = realFetch;
   delete W().__lingoASR;
+
+  // ---- database v1 -> v2 migration (unique lesson ids, per-device activity) ----
+  await new Promise((resolve, reject) => {
+    const req = indexedDB.open('lingo-reader-migtest', 1);
+    req.onupgradeneeded = () => {
+      const d = req.result;
+      d.createObjectStore('lessons', { keyPath: 'id', autoIncrement: true }).createIndex('lang', 'lang');
+      d.createObjectStore('media', { keyPath: 'lessonId' });
+      d.createObjectStore('words', { keyPath: 'key' }).createIndex('lang', 'lang');
+      d.createObjectStore('dict', { keyPath: 'key' });
+      d.createObjectStore('activity', { keyPath: 'key' }).createIndex('lang', 'lang');
+      d.createObjectStore('kv', { keyPath: 'key' });
+      req.transaction.objectStore('lessons').put({ id: 1, lang: 'es', title: 'Vieja', words: { hola: 1 } });
+      req.transaction.objectStore('words').put({ key: 'es|hola', lang: 'es', term: 'hola', lessons: [1] });
+      req.transaction.objectStore('activity').put({ key: '2026-10-01|es', date: '2026-10-01', lang: 'es', known: 3 });
+    };
+    req.onsuccess = () => { req.result.close(); resolve(); };
+    req.onerror = () => reject(req.error);
+  });
+  db.useDatabase('migtest');
+  const migLessons = await db.all('lessons');
+  const migWord = await db.get('words', 'es|hola');
+  const migAct = await db.all('activity');
+  ok(typeof migLessons[0].id === 'string' && migWord.lessons[0] === migLessons[0].id, 'migration: lesson ids become unique strings, word links follow');
+  ok(migAct[0].key.split('|').length === 3 && migAct[0].known === 3, 'migration: activity rows get a device id, counts kept');
+  db.useDatabase(null);
+  indexedDB.deleteDatabase('lingo-reader-migtest');
+
+  // ---- accounts + sync between two devices (in-memory stand-in for Supabase) ----
+  const cloud = await import('../js/cloud.js');
+  const server = (() => {
+    const users = new Map(), rows = new Map();
+    let clock = 0;
+    const json = (o, status = 200) => new Response(JSON.stringify(o), { status, headers: { 'content-type': 'application/json' } });
+    const session = (u) => ({ access_token: `tok-${u.id}`, refresh_token: 'r', expires_in: 3600, user: { id: u.id, email: u.email, user_metadata: { name: u.name } } });
+    return async (url, opts = {}) => {
+      const u = new URL(url);
+      const body = typeof opts.body === 'string' ? JSON.parse(opts.body) : null;
+      if (u.pathname === '/auth/v1/signup') {
+        const user = { id: `user${users.size + 1}`, email: body.email, password: body.password, name: body.data?.name };
+        users.set(body.email, user);
+        return json(session(user));
+      }
+      if (u.pathname === '/auth/v1/token') {
+        const user = users.get(body.email);
+        return user && user.password === body.password ? json(session(user)) : json({ error_description: 'Invalid login credentials' }, 400);
+      }
+      const uid = (opts.headers?.Authorization || '').replace('Bearer tok-', '');
+      if (u.pathname === '/rest/v1/rpc/push_records') {
+        for (const r of body.rows) {
+          const k = `${uid}|${r.kind}|${r.key}`;
+          const old = rows.get(k);
+          if (!old || r.updated_at > old.updated_at) rows.set(k, { ...r, synced_at: new Date(Date.UTC(2026, 0, 1) + ++clock).toISOString() });
+        }
+        return new Response(null, { status: 204 });
+      }
+      if (u.pathname === '/rest/v1/records') {
+        const from = u.searchParams.get('synced_at').replace('gte.', '');
+        return json([...rows].filter(([k]) => k.startsWith(`${uid}|`)).map(([, r]) => r)
+          .filter((r) => r.synced_at >= from).sort((a, b) => (a.synced_at < b.synced_at ? -1 : 1))
+          .slice(0, Number(u.searchParams.get('limit'))));
+      }
+      return json({ message: 'not found' }, 404);
+    };
+  })();
+  const pageFetch = window.fetch;
+  window.fetch = (url, opts) => (String(url).startsWith('https://fake.supabase.test') ? server(url, opts) : pageFetch(url, opts));
+  const savedLs = Object.fromEntries(['lingo-cloud', 'lingo-accounts', 'lingo-active'].map((k) => [k, localStorage.getItem(k)]));
+  cloud.setCloudConfig('https://fake.supabase.test', 'anon-key');
+  const acc = await cloud.signUp('ana@example.com', 'secret1', 'Ana');
+  ok(acc.id === 'user1' && cloud.accounts().some((a) => a.email === 'ana@example.com'), 'create an account');
+  localStorage.setItem('lingo-active', JSON.stringify(acc.id));
+
+  // device A (computer): some progress, then sync
+  db.useDatabase(`${acc.id}-A`);
+  await db.put('lessons', { id: 'lA', lang: 'es', title: 'Lección', segments: [{ text: 'Hola mundo.' }], words: { hola: 1, mundo: 1 } });
+  await db.put('words', { key: 'es|mundo', lang: 'es', term: 'mundo', status: 2, hint: 'world', lessons: ['lA'] });
+  await db.setSetting('settings', { lang: 'es', native: 'en', dailyGoal: 33 });
+  await db.setSetting('secret:openrouter', 'sk-should-stay-here');
+  await cloud.syncNow();
+  ok(cloud.status.state === 'ok', 'device A synced: ' + cloud.status.state + ' ' + cloud.status.error);
+
+  // device B (phone): log in, everything arrives (except the secret key)
+  await cloud.logIn('ana@example.com', 'secret1');
+  db.useDatabase(`${acc.id}-B`);
+  await cloud.syncNow();
+  const bLesson = await db.get('lessons', 'lA'), bWord = await db.get('words', 'es|mundo');
+  ok(bLesson?.segments[0].text === 'Hola mundo.' && bWord?.hint === 'world' && (await db.getSetting('settings')).dailyGoal === 33,
+    'device B receives lessons, transcripts, words and settings');
+  ok(!(await db.getSetting('secret:openrouter')), 'API keys are not synced');
+
+  // B changes the word (newer), A deletes the lesson: each device gets the other's change
+  await new Promise((r) => setTimeout(r, 5));
+  await db.put('words', { ...bWord, status: 5, hint: 'world (known)' });
+  await cloud.syncNow();
+  db.useDatabase(`${acc.id}-A`);
+  await db.del('lessons', 'lA');
+  await cloud.syncNow();
+  ok((await db.get('words', 'es|mundo'))?.status === 5, 'a change made on the phone reaches the computer');
+  db.useDatabase(`${acc.id}-B`);
+  await cloud.syncNow();
+  ok(!(await db.get('lessons', 'lA')), 'a lesson deleted on the computer disappears from the phone');
+
+  // a second account has its own separate data
+  const acc2 = await cloud.signUp('ben@example.com', 'secret2', 'Ben');
+  localStorage.setItem('lingo-active', JSON.stringify(acc2.id));
+  db.useDatabase(`${acc2.id}-A`);
+  await cloud.syncNow();
+  ok(!(await db.get('words', 'es|mundo')) && cloud.accounts().length >= 2, 'a second account starts empty and keeps its own data');
+
+  // clean up
+  db.useDatabase(null);
+  window.fetch = pageFetch;
+  for (const [k, v] of Object.entries(savedLs)) v === null ? localStorage.removeItem(k) : localStorage.setItem(k, v);
+  for (const n of [`${acc.id}-A`, `${acc.id}-B`, `${acc2.id}-A`]) indexedDB.deleteDatabase(`lingo-reader-${n}`);
 
   ok(!D().body.dataset.error, 'no runtime errors: ' + (D().body.dataset.error || 'none'));
 } catch (e) {

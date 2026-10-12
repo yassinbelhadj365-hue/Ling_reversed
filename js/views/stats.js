@@ -31,7 +31,13 @@ function niceMax(v) {
 
 export async function renderStats(view) {
   const rows = await db.byLang('activity', lang());
-  const byDate = new Map(rows.map((r) => [r.date, r]));
+  // One row per device and day: add them up.
+  const byDate = new Map();
+  for (const r of rows) {
+    const sum = byDate.get(r.date) || { date: r.date, known: 0, lingqs: 0, read: 0, reviews: 0 };
+    for (const k of ['known', 'lingqs', 'read', 'reviews']) sum[k] += r[k] || 0;
+    byDate.set(r.date, sum);
+  }
   const today = byDate.get(dayKey()) || { known: 0, lingqs: 0, read: 0, reviews: 0 };
   const lessons = await db.byLang('lessons', lang());
   const pool = poolStats();

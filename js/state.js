@@ -287,9 +287,10 @@ export function dayKey(d = new Date()) {
 export async function bumpActivity(delta) {
   if (!delta || !Object.keys(delta).length) return;
   const date = dayKey();
-  const key = `${date}|${lang()}`;
+  const device = db.deviceId(); // one row per device and day, summed in the stats, so syncing never loses counts
+  const key = `${date}|${lang()}|${device}`;
   await db.update('activity', key, (row) => {
-    row = row || { key, date, lang: lang(), known: 0, lingqs: 0, read: 0, reviews: 0 };
+    row = row || { key, date, lang: lang(), device, known: 0, lingqs: 0, read: 0, reviews: 0 };
     for (const [k, v] of Object.entries(delta)) row[k] = (row[k] || 0) + v;
     return row;
   });
