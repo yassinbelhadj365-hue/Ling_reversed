@@ -1,7 +1,8 @@
 // App-wide state: settings, the in-memory vocabulary of the current language,
 // activity tracking, text-to-speech and small DOM helpers.
 import * as db from './db.js';
-import { NEW, KNOWN, isLearning, freshSrs } from './srs.js';
+import { NEW, KNOWN, isLearning, freshSrs, grade } from './srs.js';
+import { onLookup, onPass, onManual, onReview, undoPatch } from './knowledge.js';
 
 export const LANGS = [
   ['es', 'Spanish'], ['fr', 'French'], ['de', 'German'], ['it', 'Italian'], ['pt', 'Portuguese'],
@@ -17,7 +18,11 @@ const DEFAULTS = {
   lang: 'es',
   native: 'en',
   pageSize: 250,       // words per reader page
-  pagingKnown: true,   // turning a page marks unclicked blue words as known
+  autoStatus: true,    // word levels follow your lookups, reading and listening (knowledge.js)
+  autoPace: 'normal',  // 'cautious' | 'normal' | 'fast': encounters needed to level up
+  autoAdjustManual: true, // evidence keeps moving LingQ levels you set yourself
+  listenPasses: 2,     // untapped listens before a new word counts as known
+  pagingKnown: true,   // only when autoStatus is off: turning a page marks untapped blue words known
   dailyGoal: 20,       // LingQs created per day
   ttsRate: 0.9,
   voice: '',
@@ -71,9 +76,11 @@ function applyStatus(w, status) {
   return d;
 }
 
-export async function setStatus(term, status, patch = {}) {
+// `manual: true` when the user chose this status (pins it against automatic changes).
+export async function setStatus(term, status, patch = {}, { manual = false } = {}) {
   const w = getWord(term) || newWord(term);
   Object.assign(w, patch);
+  if (manual) w.ev = onManual(w, status);
   const d = applyStatus(w, status);
   w.updatedAt = Date.now();
   state.vocab.set(term, w);
@@ -82,13 +89,14 @@ export async function setStatus(term, status, patch = {}) {
   return w;
 }
 
-export async function setStatusMany(terms, status) {
+export async function setStatusMany(terms, status, { manual = false } = {}) {
   const changed = [];
   const total = {};
   for (const term of terms) {
     const w = getWord(term) || newWord(term);
+    if (manual) w.ev = onManual(w, status);
     const d = applyStatus(w, status);
-    if (!Object.keys(d).length) continue;
+    if (!Object.keys(d).length && !manual) continue;
     w.updatedAt = Date.now();
     state.vocab.set(term, w);
     changed.push(w);
@@ -97,6 +105,76 @@ export async function setStatusMany(terms, status) {
   await db.putMany('words', changed);
   await bumpActivity(total);
   return changed.length;
+}
+
+// ---------- automatic levels (knowledge.js) ----------
+
+function autoOpts() {
+  const s = state.settings;
+  return { pace: s.autoPace, autoAdjustManual: s.autoAdjustManual, listenPasses: s.listenPasses, day: dayKey(), now: Date.now() };
+}
+
+async function commit(words, total) {
+  await db.putMany('words', words);
+  await bumpActivity(total);
+}
+
+function addDelta(total, d) {
+  for (const [k, v] of Object.entries(d)) total[k] = (total[k] || 0) + v;
+}
+
+// events: [{term, type: 'lookup'} | {term, type: 'pass', kind: 'read' | 'listen'}]
+// Returns the status changes: [{term, from, to}].
+export async function applyEvents(events) {
+  const opts = autoOpts();
+  const dirty = new Map();
+  const changes = [];
+  const total = {};
+  for (const e of events) {
+    const w = getWord(e.term) || newWord(e.term);
+    const r = e.type === 'lookup' ? onLookup(w, opts) : onPass(w, e.kind, opts);
+    if (!r) continue;
+    const from = w.status;
+    addDelta(total, applyStatus(w, r.status));
+    w.ev = r.ev;
+    w.updatedAt = opts.now;
+    state.vocab.set(e.term, w);
+    dirty.set(e.term, w);
+    if (from !== w.status) changes.push({ term: e.term, from, to: w.status });
+  }
+  await commit([...dirty.values()], total);
+  return changes;
+}
+
+// Undo the last automatic change of each term.
+export async function undoAuto(terms) {
+  const dirty = [];
+  const total = {};
+  for (const term of [].concat(terms)) {
+    const w = getWord(term);
+    const patch = w && undoPatch(w);
+    if (!patch) continue;
+    addDelta(total, applyStatus(w, patch.status));
+    w.ev = patch.ev;
+    w.updatedAt = Date.now();
+    dirty.push(w);
+  }
+  await commit(dirty, total);
+  return dirty.length;
+}
+
+// A flashcard answer: schedule it and let the result move the word's level.
+export async function applyReview(w, g) {
+  const graded = grade(w, g);
+  const r = onReview(w, g, graded, autoOpts());
+  w.srs = graded.srs;
+  const total = applyStatus(w, r.status);
+  w.srs = graded.srs; // applyStatus resets srs when a word re-enters learning; keep the graded schedule
+  w.ev = r.ev;
+  w.updatedAt = Date.now();
+  state.vocab.set(w.term, w);
+  addDelta(total, { reviews: 1 });
+  await commit([w], total);
 }
 
 export async function saveWord(w) {
@@ -188,9 +266,16 @@ export function esc(s) {
 }
 
 let toastTimer;
-export function toast(msg, ms = 2600) {
+// action: optional {label, onClick} rendered as a button inside the toast.
+export function toast(msg, ms = 2600, action = null) {
   const el = document.getElementById('toast');
   el.textContent = msg;
+  if (action) {
+    const b = Object.assign(document.createElement('button'), { className: 'toast-action', textContent: action.label });
+    b.addEventListener('click', () => { el.hidden = true; action.onClick(); });
+    el.append(' ', b);
+    ms = Math.max(ms, 6000);
+  }
   el.hidden = false;
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => { el.hidden = true; }, ms);

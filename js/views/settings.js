@@ -13,13 +13,36 @@ export async function renderSettings(view) {
         <select id="native">${langOptions(s.native)}</select></div>
       <div class="field"><label for="pageSize">Words per reader page</label>
         <input id="pageSize" type="number" min="50" max="2000" step="50" value="${s.pageSize}"></div>
-      <label class="row"><input type="checkbox" id="pagingKnown" ${s.pagingKnown ? 'checked' : ''}>
-        Turning a page marks blue words I didn’t tap as known</label>
-      <p class="small muted">This is how LingQ grows your known-word count without extra clicks. Turn it off if you prefer to mark words yourself.</p>
       <div class="field"><label for="dailyGoal">Daily goal (LingQs created)</label>
         <input id="dailyGoal" type="number" min="1" max="500" value="${s.dailyGoal}"></div>
       <label class="row"><input type="checkbox" id="mergeCues" ${s.mergeCues ? 'checked' : ''}>
         Merge short caption lines into sentences when importing</label>
+    </div>
+
+    <div class="card">
+      <h2 style="margin-top:0">Automatic word levels</h2>
+      <label class="row"><input type="checkbox" id="autoStatus" ${s.autoStatus ? 'checked' : ''}>
+        Let the app set word levels from what I do</label>
+      <div id="auto-opts" ${s.autoStatus ? '' : 'hidden'}>
+        <p class="small muted">Tapping a word makes it a LingQ (level 1). Each time you meet it again without tapping,
+          it moves toward known (about 10 encounters, at most 3 counted per day). Words you read past without tapping
+          become known right away. You can always change a level yourself, and automatic changes can be undone.</p>
+        <div class="field"><label>Leveling pace</label>
+          <div class="segmented" role="group" aria-label="Leveling pace">
+            ${[['cautious', 'Cautious'], ['normal', 'Normal'], ['fast', 'Fast']].map(([k, l]) =>
+              `<button data-pace="${k}" class="${s.autoPace === k ? 'on' : ''}">${l}</button>`).join('')}
+          </div></div>
+        <div class="field"><label for="listenPasses">New words I hear in videos without tapping become known after</label>
+          <select id="listenPasses" style="width:auto">
+            ${[1, 2, 3].map((n) => `<option value="${n}" ${s.listenPasses === n ? 'selected' : ''}>${n} listen${n > 1 ? 's' : ''}</option>`).join('')}
+          </select></div>
+        <label class="row"><input type="checkbox" id="autoAdjustManual" ${s.autoAdjustManual ? 'checked' : ''}>
+          Keep adjusting LingQ levels I set myself (words I mark Known or Ignore are never changed)</label>
+      </div>
+      <div id="paging-opt" ${s.autoStatus ? 'hidden' : ''}>
+        <label class="row"><input type="checkbox" id="pagingKnown" ${s.pagingKnown ? 'checked' : ''}>
+          Turning a page marks blue words I didn’t tap as known</label>
+      </div>
     </div>
 
     <div class="card">
@@ -55,6 +78,17 @@ export async function renderSettings(view) {
   $('#pageSize').addEventListener('change', (e) => saveSettings({ pageSize: num(e.target, 50, 2000, 250) }).then(() => toast('Saved')));
   $('#dailyGoal').addEventListener('change', (e) => saveSettings({ dailyGoal: num(e.target, 1, 500, 20) }).then(() => toast('Saved')));
   $('#pagingKnown').addEventListener('change', (e) => saveSettings({ pagingKnown: e.target.checked }));
+  $('#autoStatus').addEventListener('change', (e) => {
+    saveSettings({ autoStatus: e.target.checked });
+    $('#auto-opts').hidden = !e.target.checked;
+    $('#paging-opt').hidden = e.target.checked;
+  });
+  view.querySelectorAll('[data-pace]').forEach((b) => b.addEventListener('click', () => {
+    saveSettings({ autoPace: b.dataset.pace });
+    view.querySelectorAll('[data-pace]').forEach((x) => x.classList.toggle('on', x === b));
+  }));
+  $('#listenPasses').addEventListener('change', (e) => saveSettings({ listenPasses: Number(e.target.value) }));
+  $('#autoAdjustManual').addEventListener('change', (e) => saveSettings({ autoAdjustManual: e.target.checked }));
   $('#mergeCues').addEventListener('change', (e) => saveSettings({ mergeCues: e.target.checked }));
   $('#ttsRate').addEventListener('input', (e) => { $('#rateVal').textContent = e.target.value; });
   $('#ttsRate').addEventListener('change', (e) => saveSettings({ ttsRate: Number(e.target.value) }));

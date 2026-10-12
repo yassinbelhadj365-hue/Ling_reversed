@@ -1,8 +1,11 @@
 // The word/phrase panel: status buttons, your hint, dictionary results.
 // Side sheet on desktop, bottom sheet on phones.
-import { state, lang, getWord, setStatus, speak, esc } from './state.js';
+import { state, lang, getWord, setStatus, undoAuto, speak, esc } from './state.js';
 import { lookup, externalLinks } from './dict.js';
 import { NEW, KNOWN, IGNORED, isLearning } from './srs.js';
+import { progress } from './knowledge.js';
+
+const UNDO_WINDOW = 10 * 60 * 1000;
 
 const panel = document.getElementById('word-panel');
 let current = null; // {term, context, onChange, defs}
@@ -46,6 +49,7 @@ function render() {
       </div>
     </div>
     <div class="muted small">${STATUS_LABEL[status]}${where}</div>
+    ${autoLine(w)}
     <div class="status-row" role="group" aria-label="Set status">
       ${[1, 2, 3, 4].map((s) => `<button data-s="${s}" class="${status === s ? 'on' : ''}" title="LingQ level ${s} (key ${s})">${s}</button>`).join('')}
       <button data-s="${KNOWN}" class="${status === KNOWN ? 'on' : ''}" title="Known (key K)">✓ Known</button>
@@ -64,6 +68,18 @@ function render() {
     <ul class="defs" id="defs">${defsHtml()}</ul>
     <p class="small">${externalLinks(term, lang(), state.settings.native)
       .map(([name, url]) => `<a href="${esc(url)}" target="_blank" rel="noopener">${name}</a>`).join(' · ')}</p>`;
+}
+
+function autoLine(w) {
+  if (!w?.ev || !state.settings.autoStatus) return '';
+  const parts = [w.ev.src === 'manual' ? 'Set by you' : 'Auto · from your reading'];
+  if (isLearning(w.status)) {
+    const p = progress(w, state.settings.autoPace);
+    parts.push(`${Math.min(p.done, p.total)} / ${p.total} encounters toward known`);
+  }
+  const undo = w.ev.prev && Date.now() - (w.ev.autoAt || 0) < UNDO_WINDOW
+    ? `<button class="btn small" data-act="undo" title="Undo the last automatic change">Undo</button>` : '';
+  return `<div class="auto-line"><span>${parts.join(' · ')}</span>${undo}</div>`;
 }
 
 function defsHtml() {
@@ -87,7 +103,12 @@ async function loadDefs(term) {
 async function changeStatus(status) {
   const { term, context } = current;
   const w = getWord(term);
-  await setStatus(term, status, { context: w?.context || context });
+  await setStatus(term, status, { context: w?.context || context }, { manual: true });
+  afterChange();
+}
+
+async function undo() {
+  await undoAuto(current.term);
   afterChange();
 }
 
@@ -98,7 +119,8 @@ async function saveHint(text) {
   const w = getWord(term);
   const status = w?.status ?? NEW;
   if (!text.trim() && !isLearning(status)) return;
-  await setStatus(term, isLearning(status) ? status : 1, { hint: text.trim(), context: w?.context || context });
+  if (isLearning(status)) await setStatus(term, status, { hint: text.trim(), context: w?.context || context });
+  else await setStatus(term, 1, { hint: text.trim(), context: w?.context || context }, { manual: true });
   afterChange();
 }
 
@@ -115,6 +137,7 @@ panel.addEventListener('click', (e) => {
   if (!t) return;
   if (t.dataset.act === 'close') return closePanel();
   if (t.dataset.act === 'speak') return speak(current.term);
+  if (t.dataset.act === 'undo') return undo();
   if (t.dataset.open) return openPanel(t.dataset.open, { context: current.context, onChange: current.onChange });
   if (t.dataset.s !== undefined) return changeStatus(Number(t.dataset.s));
   if (t.dataset.def !== undefined) return saveHint(current.defs[Number(t.dataset.def)].text);

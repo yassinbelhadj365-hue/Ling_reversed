@@ -6,6 +6,7 @@
 <script type="module">
 import { tokenize, parseAny, mergeCues, youTubeId, parseSubtitles } from '../js/text.js';
 import { grade, freshSrs } from '../js/srs.js';
+import { onLookup, onPass, onManual, onReview, undoPatch, computeStatus } from '../js/knowledge.js';
 
 const log = [];
 let fails = 0;
@@ -35,6 +36,35 @@ try {
   const g = grade({ status: 1, srs: freshSrs() }, 'good');
   ok(g.status === 2 && g.srs.interval === 1, 'SRS good: level up, 1 day');
   ok(grade({ status: 3, srs: freshSrs() }, 'again').status === 1, 'SRS again: back to level 1');
+
+  // ---- unit: automatic word levels (knowledge.js) ----
+  const apply = (w, r) => (r ? { ...w, status: r.status, ev: r.ev } : w);
+  const fresh = () => ({ term: 'x', status: 0 });
+  const o = (day = 'd1', extra = {}) => ({ day, pace: 'normal', listenPasses: 2, autoAdjustManual: true, now: 1e12, ...extra });
+  ok(apply(fresh(), onPass(fresh(), 'read', o())).status === 5, 'auto: new + read pass → known');
+  let w = apply(fresh(), onPass(fresh(), 'listen', o()));
+  ok(w.status === 0, 'auto: new + 1 listen pass → still new');
+  ok(apply(w, onPass(w, 'listen', o())).status === 5, 'auto: new + 2 listen passes → known');
+  ok(apply(fresh(), onPass(fresh(), 'listen', o('d1', { listenPasses: 1 }))).status === 5, 'auto: listenPasses=1 → known after 1 listen');
+  w = apply(fresh(), onLookup(fresh(), o()));
+  ok(w.status === 1, 'auto: lookup → LingQ 1');
+  w = apply(w, onPass(w, 'read', o())); w = apply(w, onPass(w, 'read', o()));
+  ok(w.status === 2, 'auto: 2 clean encounters → level 2');
+  w = apply(w, onPass(w, 'read', o()));
+  ok(onPass(w, 'read', o()) === null, 'auto: 4th encounter on the same day ignored');
+  for (const d of ['d2', 'd3', 'd4']) for (let i = 0; i < 3; i++) w = apply(w, onPass(w, 'read', o(d)));
+  ok(w.status === 5, `auto: ~10 clean encounters over 4 days → known (status ${w.status})`);
+  ok(apply({ term: 'x', status: 3 }, onLookup({ term: 'x', status: 3 }, o())).status === 2, 'auto: lookup on level 3 → 2');
+  let m = { term: 'x', status: 5 }; m.ev = onManual(m, 5);
+  ok(apply(m, onLookup(m, o())).status === 5, 'auto: manual Known survives a lookup');
+  m = { term: 'x', status: 2 }; m.ev = onManual(m, 2);
+  ok(onPass(m, 'read', o('d1', { autoAdjustManual: false })) === null, 'auto: manual level 2 pinned when adjusting is off');
+  w = apply(fresh(), onLookup(fresh(), o()));
+  ok(undoPatch(w).status === 0, 'auto: undo restores previous status');
+  const r = { term: 'x', status: 4, ev: { base: 4, since: 0, look: 1 } };
+  ok(onReview(r, 'good', { status: 4, srs: { interval: 25 } }).status === 5, 'auto: review interval ≥21 days → known');
+  ok(onReview(r, 'again', { status: 1, srs: { interval: 0 } }).status === 1, 'auto: review again → level 1');
+  ok(computeStatus({ look: 0, base: 0, pre: 1 }) === 0, 'auto: computeStatus pre < threshold stays new');
 
   // ---- e2e through the real app ----
   const frame = document.getElementById('app');
@@ -72,6 +102,9 @@ try {
   comida.click();
   await until(() => !D().getElementById('word-panel').hidden);
   ok(D().querySelector('.panel-word').textContent === 'comida', 'panel opened for word');
+  await until(() => D().querySelector('#reader .w[data-n="comida"]').classList.contains('st-1'));
+  ok([...D().querySelectorAll('#reader .w[data-n="comida"]')].every((s) => s.classList.contains('st-1')), 'tapping a word made it LingQ 1 automatically');
+  ok(/Auto/.test(D().querySelector('#word-panel .auto-line')?.textContent || ''), 'panel shows the automatic-level line');
   D().querySelector('#word-panel [data-s="2"]').click();
   await sleep(300);
   ok([...D().querySelectorAll('#reader .w[data-n="comida"]')].every((s) => s.classList.contains('st-2')), 'both "comida" now LingQ 2 (yellow)');
@@ -97,6 +130,7 @@ try {
   D().getElementById('next').click();
   await until(() => /Lesson complete/.test(D().getElementById('reader').textContent));
   ok(/Lesson complete/.test(D().getElementById('reader').textContent), 'lesson completed');
+  ok(/13 words moved to known/.test(D().getElementById('reader').textContent), 'completion reports 13 words moved to known by reading');
 
   // vocab pool
   W().location.hash = '#/vocab';

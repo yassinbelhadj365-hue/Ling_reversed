@@ -1,7 +1,8 @@
 // The reader: highlighted words, phrase selection, paging, and media sync.
 import * as db from '../db.js';
 import {
-  state, statusOf, setStatusMany, markSeen, bumpActivity, removeLessonFromPool, speak, esc, toast, plural,
+  state, statusOf, setStatusMany, applyEvents, undoAuto, markSeen, bumpActivity, removeLessonFromPool,
+  speak, esc, toast, plural,
 } from '../state.js';
 import { tokenize, formatTime, sentenceAround } from '../text.js';
 import { NEW, KNOWN, isLearning } from '../srs.js';
@@ -63,8 +64,10 @@ export async function renderReader(view, id) {
       <span class="muted small" id="pageinfo"></span>
       <button class="btn primary" id="next"></button>
     </div>
-    <p class="muted small">Tap a word to look it up. Select several words to save a phrase.
-      ${state.settings.pagingKnown ? 'Turning the page marks the blue words you didn’t tap as <b>known</b>.' : ''}</p>`;
+    <p class="muted small">${state.settings.autoStatus
+      ? 'Tap words you don’t know. Words you read past without tapping become known; words you tapped level up as you meet them again.'
+      : `Tap a word to look it up. ${state.settings.pagingKnown ? 'Turning the page marks the blue words you didn’t tap as <b>known</b>.' : ''}`}
+      Select several words to save a phrase.</p>`;
 
   const reader = view.querySelector('#reader');
 
@@ -162,27 +165,40 @@ export async function renderReader(view, id) {
     openPanel(term, { context: sentenceAround(text, spans.length > 1 ? spans[0].textContent : surface), onChange: refresh });
   }
 
-  reader.addEventListener('click', (e) => {
+  // A tap is a lookup: with automatic levels on, it makes the word a LingQ
+  // (or drops a LingQ one level). Only the first tap per page counts.
+  async function lookup(term) {
+    const first = !clicked.has(term);
+    clicked.add(term);
+    if (first && state.settings.autoStatus) await applyEvents([{ term, type: 'lookup' }]);
+  }
+
+  reader.addEventListener('click', async (e) => {
     const cue = e.target.closest('.cue-time');
     if (cue) { seek?.(Number(cue.dataset.t)); return; }
     const span = e.target.closest('.w');
     if (!span) return;
     if (!getSelection().isCollapsed) return; // a phrase selection is being made
-    clicked.add(span.dataset.n);
+    await lookup(span.dataset.n);
     open(span.dataset.n, span.closest('p'), [span]);
+    refresh();
   });
 
   // Phrase selection: drag (mouse) or long-press + handles (touch) across 2–10 words.
-  function onSelect() {
+  async function onSelect() {
     const sel = getSelection();
     if (!sel || sel.isCollapsed || !reader.contains(sel.anchorNode)) return;
     const spans = [...reader.querySelectorAll('.w')].filter((s) => sel.containsNode(s, true));
     if (spans.length < 2 || spans.length > 10) return;
     const p = spans[0].closest('p');
     if (spans.some((s) => s.closest('p') !== p)) return toast('Select a phrase within one paragraph.');
-    spans.forEach((s) => clicked.add(s.dataset.n));
-    open(spans.map((s) => s.dataset.n).join(' '), p, spans);
     sel.removeAllRanges();
+    // The phrase is looked up; its words were seen while selecting, so they don't count as clean passes.
+    spans.forEach((s) => clicked.add(s.dataset.n));
+    const term = spans.map((s) => s.dataset.n).join(' ');
+    await lookup(term);
+    open(term, p, spans);
+    refresh();
   }
   reader.addEventListener('mouseup', () => setTimeout(onSelect, 0));
   let selTimer;
@@ -193,29 +209,48 @@ export async function renderReader(view, id) {
   }
 
   // ---------- paging ----------
+  // Returns the status changes caused by turning the page: [{term, from, to}].
   async function finishPage() {
     const spans = [...reader.querySelectorAll('.w')];
     const unique = new Set(spans.map((s) => s.dataset.n));
-    let moved = 0;
-    if (state.settings.pagingKnown) {
+    let changes = [];
+    if (state.settings.autoStatus) {
+      const passed = [...unique].filter((t) => !clicked.has(t));
+      changes = await applyEvents(passed.map((term) => ({ term, type: 'pass', kind: 'read' })));
+    } else if (state.settings.pagingKnown) {
       const toKnow = [...unique].filter((t) => statusOf(t) === NEW && !clicked.has(t));
-      moved = await setStatusMany(toKnow, KNOWN);
+      await setStatusMany(toKnow, KNOWN);
+      changes = toKnow.map((term) => ({ term, from: NEW, to: KNOWN }));
     }
     await markSeen(unique);
     await bumpActivity({ read: spans.length });
-    return moved;
+    return changes;
+  }
+
+  function summarize(changes) {
+    const known = changes.filter((c) => c.to === KNOWN).length;
+    const up = changes.filter((c) => isLearning(c.to) && c.to > c.from).length;
+    return [known && `${plural(known, 'word')} moved to known`, up && `${plural(up, 'LingQ')} leveled up`]
+      .filter(Boolean).join(' · ');
   }
 
   view.querySelector('#next').addEventListener('click', async () => {
     closePanel();
-    const moved = await finishPage();
+    const changes = await finishPage();
+    const msg = summarize(changes);
+    const undoable = state.settings.autoStatus && changes.length;
+    const undoAction = { label: 'Undo', onClick: async () => {
+      const n = await undoAuto(changes.map((c) => c.term));
+      refresh();
+      toast(`${plural(n, 'change')} undone`);
+    } };
     if (page < pages.length - 1) {
       page++;
       lesson.page = page;
       await db.put('lessons', lesson);
       renderPage();
       window.scrollTo(0, 0);
-      if (moved) toast(`${plural(moved, 'word')} moved to known`);
+      if (msg) toast(msg, 3000, undoable ? undoAction : null);
     } else {
       lesson.completed = true;
       lesson.page = 0;
@@ -224,7 +259,7 @@ export async function renderReader(view, id) {
       reader.innerHTML = `
         <div class="empty">
           <p style="font-size:2rem;margin:0">🎉</p>
-          <p><b>Lesson complete.</b>${moved ? ` ${plural(moved, 'word')} moved to known.` : ''}</p>
+          <p><b>Lesson complete.</b>${msg ? ` ${esc(msg)}.` : ''}</p>
           <p>${plural(learning, 'LingQ')} from this lesson are waiting in review.</p>
           <div class="row" style="justify-content:center">
             <a class="btn primary" href="#/review">Review LingQs</a>

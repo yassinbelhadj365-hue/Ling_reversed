@@ -1,5 +1,5 @@
-import { state, setStatus, saveWord, bumpActivity, speak, esc, plural } from '../state.js';
-import { grade, previewInterval, isLearning, KNOWN, IGNORED } from '../srs.js';
+import { state, setStatus, applyReview, bumpActivity, speak, esc, plural } from '../state.js';
+import { previewInterval, isLearning, KNOWN, IGNORED } from '../srs.js';
 
 const GRADES = [['again', 'Again'], ['hard', 'Hard'], ['good', 'Good'], ['easy', 'Easy']];
 
@@ -72,17 +72,13 @@ export async function renderReview(view) {
 
   async function answer(g) {
     const w = queue[idx];
-    const { srs, status } = grade(w, g);
-    w.srs = srs;
-    w.status = status;
-    await saveWord(w);
-    await bumpActivity({ reviews: 1 });
+    await applyReview(w, g);
     if (g === 'again') queue.push(w); // see it again this session
     next();
   }
 
   async function setTo(status) {
-    await setStatus(queue[idx].term, status);
+    await setStatus(queue[idx].term, status, {}, { manual: true });
     await bumpActivity({ reviews: 1 });
     next();
   }

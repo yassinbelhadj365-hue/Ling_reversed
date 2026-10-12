@@ -118,7 +118,7 @@ export async function renderVocab(view) {
   $('#bulk').addEventListener('click', async () => {
     const rows = visible();
     if (!confirm(`Mark ${rows.length.toLocaleString()} words as known?`)) return;
-    const n = await setStatusMany(rows.map((w) => w.term), KNOWN);
+    const n = await setStatusMany(rows.map((w) => w.term), KNOWN, { manual: true });
     toast(`${plural(n, 'word')} marked as known`);
     renderVocab(view);
   });
@@ -127,7 +127,7 @@ export async function renderVocab(view) {
     const { counts } = countWords([{ text: $('#known-text').value }], lang());
     const terms = Object.keys(counts);
     if (!terms.length) return toast('No words found.');
-    const n = await setStatusMany(terms, KNOWN);
+    const n = await setStatusMany(terms, KNOWN, { manual: true });
     toast(`${plural(n, 'word')} marked as known`);
     renderVocab(view);
   });
