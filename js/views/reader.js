@@ -47,6 +47,7 @@ export async function renderReader(view, id) {
     <div class="reader-head">
       <h1 dir="auto">${esc(lesson.title)}</h1>
       <div class="row">
+        <a class="badge session-chip" id="session-chip" href="#/vocab/auto" title="Automatic changes this session — tap to review or revert" hidden></a>
         <button class="btn small" id="tts" title="Read this page aloud">🔊 Listen</button>
         <button class="btn small danger" id="del">Delete</button>
       </div>
@@ -155,6 +156,7 @@ export async function renderReader(view, id) {
       s.className = `w ${statusClass(s.dataset.n)}${s.dataset.n === active ? ' active' : ''}`;
     }
     markPhrases();
+    track([]);
   }
 
   function open(term, p, spans) {
@@ -165,12 +167,26 @@ export async function renderReader(view, id) {
     openPanel(term, { context: sentenceAround(text, spans.length > 1 ? spans[0].textContent : surface), onChange: refresh });
   }
 
+  // Automatic changes made while this lesson is open: term -> {from, to}.
+  const session = new Map();
+  function track(changes) {
+    for (const c of changes) session.set(c.term, { from: session.get(c.term)?.from ?? c.from, to: c.to });
+    for (const [term, c] of session) if (statusOf(term) === c.from) session.delete(term); // undone
+    const all = [...session.values()];
+    const known = all.filter((c) => c.to === KNOWN).length;
+    const added = all.filter((c) => isLearning(c.to) && !isLearning(c.from)).length;
+    const up = all.filter((c) => isLearning(c.to) && isLearning(c.from) && c.to > c.from).length;
+    const chip = view.querySelector('#session-chip');
+    chip.textContent = [known && `+${known} known`, added && `+${added} LingQs`, up && `${up} ↑`].filter(Boolean).join(' · ');
+    chip.hidden = !chip.textContent;
+  }
+
   // A tap is a lookup: with automatic levels on, it makes the word a LingQ
   // (or drops a LingQ one level). Only the first tap per page counts.
   async function lookup(term) {
     const first = !clicked.has(term);
     clicked.add(term);
-    if (first && state.settings.autoStatus) await applyEvents([{ term, type: 'lookup' }]);
+    if (first && state.settings.autoStatus) track(await applyEvents([{ term, type: 'lookup' }]));
   }
 
   reader.addEventListener('click', async (e) => {
@@ -237,11 +253,13 @@ export async function renderReader(view, id) {
   view.querySelector('#next').addEventListener('click', async () => {
     closePanel();
     const changes = await finishPage();
+    track(changes);
     const msg = summarize(changes);
     const undoable = state.settings.autoStatus && changes.length;
     const undoAction = { label: 'Undo', onClick: async () => {
       const n = await undoAuto(changes.map((c) => c.term));
       refresh();
+      track([]);
       toast(`${plural(n, 'change')} undone`);
     } };
     if (page < pages.length - 1) {

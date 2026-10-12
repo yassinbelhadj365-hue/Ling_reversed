@@ -131,6 +131,7 @@ try {
   await until(() => /Lesson complete/.test(D().getElementById('reader').textContent));
   ok(/Lesson complete/.test(D().getElementById('reader').textContent), 'lesson completed');
   ok(/13 words moved to known/.test(D().getElementById('reader').textContent), 'completion reports 13 words moved to known by reading');
+  ok(/\+13 known/.test(D().getElementById('session-chip').textContent), 'session chip: ' + D().getElementById('session-chip').textContent);
 
   // vocab pool
   W().location.hash = '#/vocab';
@@ -138,6 +139,17 @@ try {
   const tiles = [...D().querySelectorAll('.tile .v')].map((t) => t.textContent);
   ok(tiles[1] === '13', `known words after paging: ${tiles[1]} (expect 13 = 16 unique − comida − muy − rica)`);
   ok(tiles[2] === '2', `LingQs: ${tiles[2]} (comida + "muy rica")`);
+
+  // automatic changes are listed and can be reverted
+  W().location.hash = '#/vocab/auto';
+  await until(() => D().querySelector('[data-f="auto"].on'));
+  const autoRows = D().querySelectorAll('#table tbody tr').length;
+  ok(autoRows === 13, `auto-changed filter lists ${autoRows} words (13 known; the phrase was then set manually)`);
+  D().querySelector('[data-revert="hola"]').click();
+  await until(() => !D().querySelector('[data-revert="hola"]'));
+  W().location.hash = '#/vocab';
+  await until(() => D().querySelector('[data-f="new"].on') && D().querySelector('.tiles'));
+  ok(D().querySelectorAll('.tile .v')[1].textContent === '12', 'revert moved "hola" back out of known');
 
   // review
   W().location.hash = '#/review';

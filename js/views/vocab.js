@@ -1,10 +1,15 @@
 // The word pool: every word you have met in imported content, and where you stand with it.
-import { state, lang, langName, setStatusMany, esc, toast, plural, download } from '../state.js';
+import { state, lang, langName, setStatusMany, undoAuto, esc, toast, plural, download } from '../state.js';
 import { countWords } from '../text.js';
 import { NEW, KNOWN, IGNORED, isLearning } from '../srs.js';
+import { progress } from '../knowledge.js';
 import { openPanel } from '../panel.js';
 
+const WEEK = 7 * 864e5;
+const recentAuto = (w) => !!w.ev?.prev && w.ev.autoAt > Date.now() - WEEK;
+
 const FILTERS = [
+  ['auto', 'Auto-changed', recentAuto],
   ['new', 'New', (w) => w.status === NEW],
   ['lingq', 'LingQs', (w) => isLearning(w.status)],
   ['known', 'Known', (w) => w.status === KNOWN],
@@ -32,8 +37,8 @@ export function poolStats() {
   return { known, learning, fresh, ignored, size: known + learning + fresh, coverage: occAll ? occKnown / occAll : 0 };
 }
 
-export async function renderVocab(view) {
-  let filter = 'new';
+export async function renderVocab(view, initialFilter) {
+  let filter = FILTERS.some((f) => f[0] === initialFilter) ? initialFilter : 'new';
   let sort = 'freq';
   let query = '';
   let limit = 200;
@@ -77,7 +82,18 @@ export async function renderVocab(view) {
     const q = query.toLocaleLowerCase();
     return [...state.vocab.values()]
       .filter((w) => f(w) && (!q || w.term.includes(q) || (w.hint || '').toLocaleLowerCase().includes(q)))
-      .sort(SORTS.find((x) => x[0] === sort)[2]);
+      .sort(filter === 'auto' ? (a, b) => b.ev.autoAt - a.ev.autoAt : SORTS.find((x) => x[0] === sort)[2]);
+  }
+
+  function encounters(w) {
+    if (!isLearning(w.status) || !state.settings.autoStatus) return '';
+    const p = progress(w, state.settings.autoPace);
+    return `${Math.min(p.done, p.total)} / ${p.total}`;
+  }
+
+  function changeText(w) {
+    if (!recentAuto(w)) return '';
+    return `${STATUS_TEXT[w.ev.prev.status]} → ${STATUS_TEXT[w.status]}`;
   }
 
   function draw() {
@@ -85,14 +101,16 @@ export async function renderVocab(view) {
     const rows = visible();
     $('#table').innerHTML = rows.length ? `
       <div class="table-wrap"><table>
-        <thead><tr><th>Word</th><th>Status</th><th>Hint</th><th>Seen in text</th><th>Lessons</th></tr></thead>
+        <thead><tr><th>Word</th><th>Status</th><th>Hint</th><th>Encounters to known</th><th>Seen in text</th><th>Lessons</th><th>Auto change</th></tr></thead>
         <tbody>${rows.slice(0, limit).map((w) => `
           <tr>
             <td><a href="javascript:void 0" data-term="${esc(w.term)}" dir="auto">${esc(w.term)}</a></td>
             <td><span class="dot" style="background:${STATUS_COLOR[w.status]}"></span>${STATUS_TEXT[w.status]}</td>
             <td class="hint" dir="auto">${esc(w.hint || '')}</td>
+            <td>${encounters(w)}</td>
             <td>${(w.freq || 0).toLocaleString()}×</td>
             <td>${w.lessons?.length || 0}</td>
+            <td>${recentAuto(w) ? `${changeText(w)} <button class="btn small" data-revert="${esc(w.term)}">Revert</button>` : ''}</td>
           </tr>`).join('')}
         </tbody></table></div>
       <p class="small muted">${rows.length > limit ? `Showing ${limit.toLocaleString()} of ` : ''}${plural(rows.length, 'word')}</p>`
@@ -107,7 +125,13 @@ export async function renderVocab(view) {
   $('#sort').addEventListener('change', (e) => { sort = e.target.value; draw(); });
   $('#q').addEventListener('input', (e) => { query = e.target.value.trim(); limit = 200; draw(); });
   $('#more').addEventListener('click', () => { limit += 500; draw(); });
-  $('#table').addEventListener('click', (e) => {
+  $('#table').addEventListener('click', async (e) => {
+    const rev = e.target.closest('[data-revert]');
+    if (rev) {
+      await undoAuto(rev.dataset.revert);
+      toast(`Reverted “${rev.dataset.revert}”`);
+      return draw();
+    }
     const a = e.target.closest('[data-term]');
     if (!a) return;
     e.preventDefault();
