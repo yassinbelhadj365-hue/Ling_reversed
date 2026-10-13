@@ -1,5 +1,5 @@
 import * as db from '../db.js';
-import { state, LANGS, lang, saveSettings, loadSettings, loadVocab, toast, download, esc } from '../state.js';
+import { state, LANGS, lang, langName, saveSettings, loadSettings, loadVocab, toast, download, esc } from '../state.js';
 import { onDeviceStatus, installOnDevice } from '../translate.js';
 import { getKey, setKey, listModels, defaultModel } from '../assist.js';
 import { aiStatus, explain } from '../explain.js';
@@ -82,14 +82,17 @@ export async function renderSettings(view) {
     <div class="card">
       <h2 style="margin-top:0">Explanations</h2>
       <p class="small muted">When you tap a word or select a sentence, an AI explains it <b>in the language you’re learning</b>,
-        in simple words with example sentences, using the whole transcript as context. English (or your native language)
-        stays hidden behind a button, so you think in the language first. Free sources only: Chrome’s built-in AI (Gemini Nano,
+        in simple words with example sentences, using the whole transcript as context, next to the translation in your
+        native language. Free sources only: Chrome’s built-in AI (Gemini Nano,
         on your device) or, elsewhere, the free OpenRouter model set up below.</p>
       <div class="row"><span class="small">Chrome’s built-in AI:</span> <span id="ai-status" class="small muted">Checking…</span></div>
       <label class="row"><input type="checkbox" data-bool="aiAuto" ${s.aiAuto ? 'checked' : ''}>
         Explain automatically when I tap (otherwise there’s an Explain button — saves free-model daily limits)</label>
-      <label class="row"><input type="checkbox" data-bool="showEnglish" ${s.showEnglish ? 'checked' : ''}>
-        Always show translations in my native language too (no button)</label>
+      <div class="field" style="margin-top:12px"><label for="firstLang">In the word panel, show first</label>
+        <select id="firstLang">
+          <option value="target" ${s.firstLang !== 'native' ? 'selected' : ''}>The explanation in ${esc(langName(s.lang))}, then ${esc(langName(s.native))}</option>
+          <option value="native" ${s.firstLang === 'native' ? 'selected' : ''}>The ${esc(langName(s.native))} translation, then ${esc(langName(s.lang))}</option>
+        </select></div>
     </div>
 
     <div class="card">
@@ -157,6 +160,7 @@ export async function renderSettings(view) {
   $('#autoAdjustManual').addEventListener('change', (e) => saveSettings({ autoAdjustManual: e.target.checked }));
   view.querySelectorAll('[data-bool]').forEach((el) =>
     el.addEventListener('change', () => saveSettings({ [el.dataset.bool]: el.checked })));
+  $('#firstLang').addEventListener('change', (e) => saveSettings({ firstLang: e.target.value }).then(() => toast('Saved')));
   $('#asrModel').addEventListener('change', (e) => saveSettings({ asrModel: e.target.value }).then(() => toast('Saved')));
   $('#translateEmail').addEventListener('change', (e) => saveSettings({ translateEmail: e.target.value.trim() }).then(() => toast('Saved')));
 

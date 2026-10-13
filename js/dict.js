@@ -145,7 +145,7 @@ export function parseMonolingual(html) {
           if (nested) {
             for (const sub of nested.querySelectorAll(':scope > li, :scope > dd')) {
               const c = sub.cloneNode(true);
-              c.querySelectorAll('ul, ol, dl, figure, .reference, sup, style').forEach((n) => n.remove());
+              c.querySelectorAll('ul, ol, dl, figure, .reference, sup, sub, style').forEach((n) => n.remove());
               const ex = sub.querySelector(':scope > ul li');
               add(textOf(c), ex ? textOf(ex).slice(0, 180) : '', '');
             }
@@ -153,7 +153,7 @@ export function parseMonolingual(html) {
           continue;
         }
         const clone = li.cloneNode(true);
-        clone.querySelectorAll('ul, ol, dl, .reference, sup, style').forEach((n) => n.remove());
+        clone.querySelectorAll('ul, ol, dl, .reference, sup, sub, style').forEach((n) => n.remove());
         const text = textOf(clone);
         // The shortest of the first few examples: literary quotes can be very long.
         const exs = [...li.querySelectorAll(':scope > ul .example q')].slice(0, 4);
@@ -169,7 +169,7 @@ export function parseMonolingual(html) {
     )) {
       for (const dd of el.querySelectorAll(':scope > dd')) {
         const clone = dd.cloneNode(true);
-        clone.querySelectorAll('ul, ol, dl, .reference, sup, style').forEach((n) => n.remove());
+        clone.querySelectorAll('ul, ol, dl, .reference, sup, sub, style').forEach((n) => n.remove());
         add(textOf(clone).replace(/^\[\d+[a-z]?\]\s*/, ''), '', '');
       }
     }
@@ -200,7 +200,7 @@ async function monolingualFetch(term, lang) {
 // -> {source, url, entries} | null (cached for 60 days, negative results too)
 export async function monolingual(term, lang) {
   if (window.__lingoMono) return window.__lingoMono(term, lang); // smoke-test hook
-  const key = `m|${lang}|${term.toLocaleLowerCase()}`;
+  const key = `m2|${lang}|${term.toLocaleLowerCase()}`; // m2: sense-number subscripts removed
   const cached = await db.get('dict', key);
   if (cached && Date.now() - cached.at < CACHE_DAYS * 864e5) return cached.value;
   const value = await monolingualFetch(term, lang).catch(() => undefined);

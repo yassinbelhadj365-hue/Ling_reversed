@@ -28,7 +28,6 @@ export function openPanel(term, {
 } = {}) {
   current = {
     term, mode, context, mark, around, flag, transcript, onFlag, onChange, onClose,
-    showEnglish: !!state.settings.showEnglish,
     mono: mode === 'word' ? { state: 'loading' } : null, // dictionary in the target language
     defs: null, tr: null, expr: null, list: [],
     explain: null, deep: null, handoff: null,
@@ -148,16 +147,18 @@ function render() {
         <button class="btn small" data-act="close" aria-label="Close">✕</button>
       </div>
     </div>`;
-  const explainArea = `<div id="explain-area">${explainHtml()}</div>`;
+  // The explanation in the target language and the English part, in the order chosen in Settings.
+  const explainArea = `<div id="explain-area" class="area">${explainHtml()}</div>`;
+  const englishArea = `<div id="english-area" class="area">${englishHtml()}</div>`;
+  const meaning = state.settings.firstLang === 'native' ? englishArea + explainArea : explainArea + englishArea;
   const common = `
-    <div id="english-area">${englishHtml()}</div>
     <div id="assist-area">${assistHtml()}</div>
     ${current.onFlag ? `<p class="small"><button class="btn small" data-act="flag-wrong" title="Mark this as a transcript mistake">⚑ Flag as wrong in the transcript</button></p>` : ''}`;
 
   if (current.mode === 'selection') {
     panel.innerHTML = `${head('Selected text', 'small-title')}
       <p class="ctx-sentence sel-text" dir="auto">${esc(current.context)}</p>
-      ${explainArea}
+      ${meaning}
       ${chipsHtml()}
       ${common}`;
     return;
@@ -174,7 +175,7 @@ function render() {
   panel.innerHTML = `${head(term)}
     ${flagBoxHtml()}
     ${sentenceHtml()}
-    ${explainArea}
+    ${meaning}
     <div class="muted small">${STATUS_LABEL[status]}${where}</div>
     ${autoLine(w)}
     <div class="status-row" role="group" aria-label="Set status">
@@ -251,7 +252,7 @@ function autoLine(w) {
 function answerHtml(x, slot) {
   const r = x.result || {};
   const t = r.target || {}, n = r.native || {};
-  const examples = (t.examples || []).map((e, k) => `<li dir="auto">${esc(e)}${current.showEnglish && n.examples?.[k]
+  const examples = (t.examples || []).map((e, k) => `<li dir="auto">${esc(e)}${n.examples?.[k]
     ? `<div class="small muted" dir="auto">${esc(n.examples[k])}</div>` : ''}</li>`).join('');
   const lemma = r.lemma && r.lemma.toLocaleLowerCase() !== current.term.toLocaleLowerCase() ? r.lemma : '';
   return `<div class="explain">
@@ -291,7 +292,7 @@ function monoHtml() {
 function explainHtml() {
   const x = current.explain;
   const hasDict = !!current.mono?.value;
-  const label = `<div class="small muted">Explanation in ${esc(L())}</div>`;
+  const label = `<h3 class="area-label">In ${esc(L())}</h3>`;
   const ai = (() => {
     if (!x) return '';
     if (x.state === 'loading') {
@@ -316,9 +317,7 @@ function monoDef(i) {
 }
 
 function englishHtml() {
-  const btn = `<button class="btn small english-toggle" data-act="toggle-english" aria-expanded="${current.showEnglish}">
-    ${current.showEnglish ? `Hide ${esc(N())}` : `Show ${esc(N())}`} ▾</button>`;
-  if (!current.showEnglish) return btn;
+  const label = `<h3 class="area-label">In ${esc(N())}</h3>`;
   const parts = [];
   if (current.context) {
     parts.push(`<div class="dict-line"><span class="small muted">Translation</span>${trHtml()}
@@ -337,7 +336,7 @@ function englishHtml() {
     parts.push(`<p class="small">${externalLinks(current.term, lang(), state.settings.native)
       .map(([name, url]) => `<a href="${esc(url)}" target="_blank" rel="noopener">${name}</a>`).join(' · ')}</p>`);
   }
-  return `${btn}<div class="english">${parts.join('')}</div>`;
+  return `${label}<div class="english">${parts.join('')}</div>`;
 }
 
 function trHtml() {
@@ -502,7 +501,6 @@ panel.addEventListener('click', (e) => {
   if (act === 'flag-edit') { const f = current.flag; closePanel(); return f.edit(); }
   if (act === 'explain') return loadExplain({ force: true });
   if (act === 'deep') return loadExplain({ depth: 'deep' });
-  if (act === 'toggle-english') { current.showEnglish = !current.showEnglish; return renderDynamic(); }
   if (act === 'hint-target') return saveHint(slotAnswer()?.target?.meaning || '');
   if (act === 'hint-native') return saveHint(slotAnswer()?.native?.meaning || '');
   if (act === 'chatgpt') return handoff('ChatGPT');

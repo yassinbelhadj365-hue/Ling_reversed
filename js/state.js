@@ -33,7 +33,7 @@ const DEFAULTS = {
   asrModel: 'base',    // AI transcription model: 'base' | 'small' (asr.js MODELS)
   translateEmail: '',  // optional: sent to MyMemory to raise its free daily translation limit
   aiAuto: true,        // explain automatically on tap (Chrome's on-device AI, else the free OpenRouter model)
-  showEnglish: false,  // show native-language translations right away instead of behind a button
+  firstLang: 'target', // word panel: 'target' = explanation in the language you learn first, 'native' = English first
   assistModel: '',     // OpenRouter model for "Still unclear?" (free models only; '' = best available)
   quickModel: '',      // smaller free OpenRouter model for the quick explanation on each tap ('' = automatic)
   dailyGoal: 20,       // LingQs created per day

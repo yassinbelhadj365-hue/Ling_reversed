@@ -241,13 +241,14 @@ try {
   ok([...D().querySelectorAll('#reader .w[data-n="comida"]')].every((s) => s.classList.contains('st-1')), 'tapping a word made it LingQ 1 automatically');
   ok(/Auto/.test(D().querySelector('#word-panel .auto-line')?.textContent || ''), 'panel shows the automatic-level line');
   ok(D().querySelector('#word-panel .ctx-sentence mark')?.textContent === 'comida', 'panel marks the tapped word in its sentence');
-  ok(!D().querySelector('#word-panel .ctx-tr') && !D().querySelector('#word-panel #defs'), 'English translations stay hidden until asked for');
+  const areas = [...D().querySelectorAll('#word-panel .area')].map((a) => a.id);
+  ok(areas.join() === 'explain-area,english-area' && D().querySelector('#word-panel #english-area .ctx-tr') && !D().querySelector('#word-panel [data-act="toggle-english"]'),
+    'Spanish explanation first, then English, shown right away (no button): ' + areas);
   await until(() => D().querySelector('#word-panel .mono'));
   const ea = D().querySelector('#word-panel #explain-area');
   ok(/Conjunto de alimentos/.test(ea.textContent) && /La comida está lista/.test(ea.textContent),
     'the target-language dictionary (Wiktionary in Spanish) is shown first, with an example');
   ok(/add a free OpenRouter key/.test(ea.textContent), 'no AI available → suggests how to get a sentence-specific explanation');
-  D().querySelector('#word-panel [data-act="toggle-english"]').click();
   await until(() => /^Today/.test(D().querySelector('#word-panel .ctx-tr')?.textContent || ''));
   ok(/^Today we're going to talk about food\./.test(D().querySelector('#word-panel .ctx-tr')?.textContent || ''), 'panel translates the exact sentence: ' + D().querySelector('#word-panel .ctx-tr')?.textContent);
   await until(() => D().querySelector('#word-panel .meaning-here'));
@@ -377,12 +378,10 @@ try {
   ok(!fake.playing, 'tapping a word pauses the video');
   await until(() => /Señala la frase/.test(D().querySelector('#explain-area')?.textContent || ''));
   const ex = D().querySelector('#explain-area');
-  ok(/Esta casa es grande/.test(ex.textContent) && !/This house is big/.test(ex.textContent), 'explanation and examples in Spanish; English examples hidden');
+  ok(/Esta casa es grande/.test(ex.textContent) && /This house is big/.test(ex.textContent), 'explanation and examples in Spanish, each example with its English translation');
   ok(aiInput?.kind === 'word' && aiInput.sentence === lines[25] && aiInput.transcript.includes(lines[3]) && aiInput.transcript.includes(lines[38]),
     'the AI gets the sentence and the whole transcript');
-  D().querySelector('#word-panel [data-act="toggle-english"]').click();
-  ok(/This house is big/.test(D().querySelector('#explain-area').textContent) && /Feminine demonstrative/.test(D().querySelector('#english-area').textContent),
-    'Show English reveals the English explanation and example translations');
+  ok(/Feminine demonstrative/.test(D().querySelector('#english-area').textContent), 'the English explanation is shown too');
 
   // "Still unclear?": a stronger free model reads the transcript; DeepSeek / ChatGPT hand-offs
   let deepPrompt = null;
@@ -777,6 +776,15 @@ try {
   window.fetch = pageFetch;
   for (const [k, v] of Object.entries(savedLs)) v === null ? localStorage.removeItem(k) : localStorage.setItem(k, v);
   for (const n of [`${acc.id}-A`, `${acc.id}-B`, `${acc2.id}-A`]) indexedDB.deleteDatabase(`lingo-reader-${n}`);
+
+  // setting: English first
+  const appState = await W().eval("import('/js/state.js')");
+  const appPanel = await W().eval("import('/js/panel.js')");
+  appState.state.settings.firstLang = 'native';
+  appPanel.openPanel('casa', { context: 'Esta casa es grande.' });
+  ok([...D().querySelectorAll('#word-panel .area')].map((a) => a.id).join() === 'english-area,explain-area', 'with “English first” the translation comes before the Spanish explanation');
+  appPanel.closePanel();
+  appState.state.settings.firstLang = 'target';
 
   ok(!D().body.dataset.error, 'no runtime errors: ' + (D().body.dataset.error || 'none'));
 } catch (e) {
