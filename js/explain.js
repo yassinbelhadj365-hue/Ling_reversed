@@ -139,7 +139,7 @@ export async function explain(input, { depth = 'quick', onProgress } = {}) {
   }
   if (!value) {
     if (!window.__lingoAssist && !(await getKey())) throw new Error('no-provider');
-    const { result, model } = await openRouterJson(buildPrompt(input, { depth }));
+    const { result, model } = await openRouterJson({ ...buildPrompt(input, { depth }), tier: depth === 'deep' ? 'deep' : 'quick' });
     value = { result, source: `${model.split('/').pop().replace(/:free$/, '')} (free)` };
   }
   await db.put('dict', { key: cacheKey, value, at: Date.now() });

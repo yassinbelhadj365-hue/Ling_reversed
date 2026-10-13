@@ -6,7 +6,7 @@
 <script type="module">
 import { tokenize, parseAny, mergeCues, youTubeId, parseSubtitles, sentenceAt, hash32 } from '../js/text.js';
 import { chunkForMyMemory, pickMyMemory, rankByContext } from '../js/translate.js';
-import { parseDefinition } from '../js/dict.js';
+import { parseDefinition, parseMonolingual } from '../js/dict.js';
 import { expressionCandidates } from '../js/text.js';
 import { grade, freshSrs } from '../js/srs.js';
 import { onLookup, onPass, onManual, onReview, undoPatch, computeStatus } from '../js/knowledge.js';
@@ -130,6 +130,15 @@ try {
   const formHtml = '<span class="form-of-definition"><a title="Appendix:Glossary">first-person</a> plural of <span class="form-of-definition-link"><i><a title="hablar">hablar</a></i></span></span>';
   const fd = parseDefinition(formHtml, 'Verb');
   ok(fd.formOf === 'hablar' && /plural of hablar/.test(fd.text), 'parseDefinition: inflected form → lemma');
+  const frHtml = `<div class="mw-parser-output">
+    <div class="mw-heading mw-heading3"><h3>Forme de verbe</h3></div>
+    <ol><li><i>Première personne du pluriel du présent de</i> <a title="avoir">avoir</a>.
+      <ul><li><span class="example"><q>Nous <b>avons</b> faim.</q> <span class="sources">— (Auteur, 2020)</span></span></li></ul></li></ol>
+    <div class="mw-heading mw-heading3"><h3>Nom commun</h3></div>
+    <ol><li>Bâtiment servant de logis.<sup class="reference">[1]</sup></li><li>Famille.</li></ol></div>`;
+  const mono = parseMonolingual(frHtml);
+  ok(mono.length === 2 && mono[0].pos === 'Forme de verbe' && mono[0].defs[0].formOf === 'avoir' && mono[0].defs[0].example === 'Nous avons faim.'
+    && mono[1].defs.map((x) => x.text).join('|') === 'Bâtiment servant de logis.|Famille.', 'parseMonolingual: French Wiktionary definitions, examples, forms ' + JSON.stringify(mono));
   const ec = expressionCandidates('Lo hizo a pesar de todo.', 'Lo hizo a pesar de todo.'.indexOf('pesar'), 'es');
   ok(ec[0].surface === 'hizo a pesar' && ec.some((c) => c.surface === 'a pesar de') && ec.length === 5, 'expressionCandidates: 3- and 2-word runs around the word');
 
@@ -208,6 +217,10 @@ try {
   W().__lingoDict = async (term) => term === 'comida'
     ? [{ source: 'MyMemory', pos: 'translation', text: 'meal' }, { source: 'MyMemory', pos: 'translation', text: 'food' }]
     : [];
+  W().__lingoMono = async (term) => term === 'comida'
+    ? { source: 'es.wiktionary.org', url: 'https://es.wiktionary.org/wiki/comida', entries: [{ pos: 'Sustantivo femenino', defs: [
+        { text: 'Conjunto de alimentos que se toman en una ocasión.', example: 'La comida está lista.', formOf: '' }] }] }
+    : null;
   W().__lingoExpr = async (surface) => surface === 'de comida' ? [{ source: 'Wiktionary', pos: 'Phrase', text: '(test) about food' }] : [];
 
   // ---- page mode: a timed transcript without media ----
@@ -229,7 +242,11 @@ try {
   ok(/Auto/.test(D().querySelector('#word-panel .auto-line')?.textContent || ''), 'panel shows the automatic-level line');
   ok(D().querySelector('#word-panel .ctx-sentence mark')?.textContent === 'comida', 'panel marks the tapped word in its sentence');
   ok(!D().querySelector('#word-panel .ctx-tr') && !D().querySelector('#word-panel #defs'), 'English translations stay hidden until asked for');
-  ok(/No free AI is set up/.test(D().querySelector('#word-panel #explain-area').textContent), 'no AI available → explains how to get explanations in the target language');
+  await until(() => D().querySelector('#word-panel .mono'));
+  const ea = D().querySelector('#word-panel #explain-area');
+  ok(/Conjunto de alimentos/.test(ea.textContent) && /La comida está lista/.test(ea.textContent),
+    'the target-language dictionary (Wiktionary in Spanish) is shown first, with an example');
+  ok(/add a free OpenRouter key/.test(ea.textContent), 'no AI available → suggests how to get a sentence-specific explanation');
   D().querySelector('#word-panel [data-act="toggle-english"]').click();
   await until(() => /^Today/.test(D().querySelector('#word-panel .ctx-tr')?.textContent || ''));
   ok(/^Today we're going to talk about food\./.test(D().querySelector('#word-panel .ctx-tr')?.textContent || ''), 'panel translates the exact sentence: ' + D().querySelector('#word-panel .ctx-tr')?.textContent);
@@ -554,6 +571,7 @@ try {
   await until(() => V().classList.contains('listen') && /inteligencia/.test(D().getElementById('reader').textContent));
   const asrLesson = await db.get('lessons', W().location.hash.split('/').pop());
   ok(asrLesson.asr === true && asrLesson.segments.length === 2, 'lesson remembers it was transcribed by AI');
+  ok(asrLesson.title === 'Hola, esto es una prueba.', `untitled transcript is named after its first line, not the subtitle header ("${asrLesson.title}")`);
   W().fetch = realFetch;
   delete W().__lingoASR;
 

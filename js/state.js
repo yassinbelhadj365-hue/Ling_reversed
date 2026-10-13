@@ -35,6 +35,7 @@ const DEFAULTS = {
   aiAuto: true,        // explain automatically on tap (Chrome's on-device AI, else the free OpenRouter model)
   showEnglish: false,  // show native-language translations right away instead of behind a button
   assistModel: '',     // OpenRouter model for "Still unclear?" (free models only; '' = best available)
+  quickModel: '',      // smaller free OpenRouter model for the quick explanation on each tap ('' = automatic)
   dailyGoal: 20,       // LingQs created per day
   ttsRate: 0.9,
   voice: '',

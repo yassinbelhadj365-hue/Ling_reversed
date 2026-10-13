@@ -1,7 +1,7 @@
 import * as db from '../db.js';
 import { state, LANGS, lang, saveSettings, loadSettings, loadVocab, toast, download, esc } from '../state.js';
 import { onDeviceStatus, installOnDevice } from '../translate.js';
-import { getKey, setKey, listModels } from '../assist.js';
+import { getKey, setKey, listModels, defaultModel } from '../assist.js';
 import { aiStatus, explain } from '../explain.js';
 import { MODELS as ASR_MODELS } from '../asr.js';
 
@@ -104,7 +104,9 @@ export async function renderSettings(view) {
       <div class="field"><label for="or-key">OpenRouter key</label>
         <input id="or-key" type="password" autocomplete="off" placeholder="sk-or-…">
         <span class="small muted">Stored only in this browser, never included in backups, and sent only to openrouter.ai.</span></div>
-      <div class="field"><label for="or-model">Free model</label>
+      <div class="field"><label for="or-quick">Quick explanations (every tap) — a smaller, faster free model</label>
+        <select id="or-quick"><option value="">Loading free models…</option></select></div>
+      <div class="field"><label for="or-model">“Still unclear?” — a stronger free model</label>
         <select id="or-model"><option value="">Loading free models…</option></select></div>
       <div class="row"><button class="btn small" id="or-test">Test</button><span id="or-status" class="small muted"></span></div>
     </div>
@@ -182,12 +184,16 @@ export async function renderSettings(view) {
   // ---- OpenRouter (free models only) ----
   getKey().then((k) => { $('#or-key').value = k; });
   $('#or-key').addEventListener('change', (e) => setKey(e.target.value).then(() => toast('Key saved')));
-  listModels().then((models) => {
-    const current = state.settings.assistModel;
-    $('#or-model').innerHTML = models.length
-      ? models.map((m, i) => `<option value="${esc(m.id)}" ${(current ? m.id === current : i === 0) ? 'selected' : ''}>${esc(m.name)}</option>`).join('')
-      : '<option value="">No free models available right now</option>';
-  }).catch(() => { $('#or-model').innerHTML = '<option value="">Couldn’t load the model list (offline?)</option>'; });
+  Promise.all([listModels(), defaultModel('quick'), defaultModel('deep')]).then(([models, quick, deep]) => {
+    const options = (sel) => (models.length
+      ? models.map((m) => `<option value="${esc(m.id)}" ${m.id === sel ? 'selected' : ''}>${esc(m.name)}</option>`).join('')
+      : '<option value="">No free models available right now</option>');
+    $('#or-quick').innerHTML = options(quick);
+    $('#or-model').innerHTML = options(deep);
+  }).catch(() => {
+    for (const id of ['#or-quick', '#or-model']) $(id).innerHTML = '<option value="">Couldn’t load the model list (offline?)</option>';
+  });
+  $('#or-quick').addEventListener('change', (e) => saveSettings({ quickModel: e.target.value }).then(() => toast('Saved')));
   $('#or-model').addEventListener('change', (e) => saveSettings({ assistModel: e.target.value }).then(() => toast('Saved')));
   $('#or-test').addEventListener('click', async () => {
     $('#or-status').textContent = 'Asking…';

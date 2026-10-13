@@ -13,7 +13,9 @@ function prepare(raw, filename, merge) {
 }
 
 function firstLine(text) {
-  const line = text.trim().split('\n').find((l) => l.trim() && !/^[\d:.,\s\-–>\[\]]+$/.test(l)) || 'Untitled';
+  // The first line of actual text: skip subtitle headers, cue numbers and timing lines.
+  const line = text.trim().split('\n').find((l) => l.trim()
+    && !/^[\d:.,\s\-–>\[\]]+$/.test(l) && !l.includes('-->') && !/^(WEBVTT|Kind:|Language:|NOTE\b)/.test(l.trim())) || 'Untitled';
   return line.trim().slice(0, 70);
 }
 

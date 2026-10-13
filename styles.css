@@ -272,6 +272,13 @@ body.listen-mode main { max-width: 1400px; }
 .defs li.fits { border-color: var(--accent); }
 .ctx-tr mark { background: transparent; color: inherit; font-weight: 700; text-decoration: underline 2px var(--accent); }
 #explain-area { margin: 10px 0; }
+.mono { padding: 8px 10px; margin: 4px 0 10px; border-radius: 10px; background: var(--surface-2); }
+.mono-pos { margin-top: 4px; font-style: italic; }
+.mono-defs { margin: 2px 0 6px; padding-left: 20px; }
+.mono-defs li { margin-bottom: 6px; }
+.mono-def { cursor: pointer; }
+.mono-def:hover { text-decoration: underline; }
+.mono-ex { font-size: .85rem; font-style: italic; color: var(--text-2); }
 .explain { padding: 10px 12px; border-radius: 10px; border: 1px solid var(--accent); }
 .explain .ex-meaning { font-size: 1.02rem; margin: 0 0 6px; }
 .examples { margin: 4px 0 8px; padding-left: 18px; }

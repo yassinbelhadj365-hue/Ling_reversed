@@ -103,6 +103,112 @@ export async function lookup(term, lang, native) {
   return results;
 }
 
+// ---------- monolingual dictionary: the Wiktionary written in the language you're learning ----------
+// (fr.wiktionary.org for French, es.wiktionary.org for Spanish, …). Free, no AI, definitions and
+// examples in the target language. Only the section for that language is fetched.
+
+const MONO_DEFS = 6;
+const endonym = (lang) => {
+  try { return new Intl.DisplayNames([lang], { type: 'language' }).of(lang); } catch { return lang; }
+};
+const textOf = (el) => el.textContent.replace(/\s+/g, ' ').replace(/\s+([,.;:!?)])/g, '$1').trim();
+
+// Parse one language section of a Wiktionary page (HTML) into
+// [{pos, defs: [{text, example, formOf}]}]. Works across editions: definitions are the
+// items of top-level numbered lists (or dt/dd lists), grouped under the nearest heading.
+export function parseMonolingual(html) {
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  const root = doc.querySelector('.mw-parser-output') || doc.body;
+  const entries = [];
+  let pos = '';
+  let count = 0;
+  const add = (text, example, formOf) => {
+    if (!text || count >= MONO_DEFS) return;
+    let entry = entries.at(-1);
+    if (!entry || entry.pos !== pos) entries.push((entry = { pos, defs: [] }));
+    entry.defs.push({ text, example, formOf });
+    count++;
+  };
+  const isFormHeading = () => /^(forme|forma|flexion|flektierte|konjugierte|deklinierte|form of|inflected)/i.test(pos);
+  for (const el of root.children) {
+    const heading = el.matches('.mw-heading, h3, h4, h5') ? el.querySelector('h3, h4, h5') || el : null;
+    if (heading && /^H[345]$/.test(heading.tagName)) {
+      pos = textOf(heading).replace(/\[.*?\]/g, '').trim();
+      continue;
+    }
+    if (el.tagName === 'OL') {
+      for (let li of el.children) {
+        if (li.tagName !== 'LI') continue;
+        // it.wiktionary: the first item is the headword line, with the senses nested under it.
+        if (li.firstElementChild?.tagName === 'B') {
+          const nested = li.querySelector(':scope > ol, :scope > ul, :scope > dl');
+          if (nested) {
+            for (const sub of nested.querySelectorAll(':scope > li, :scope > dd')) {
+              const c = sub.cloneNode(true);
+              c.querySelectorAll('ul, ol, dl, figure, .reference, sup, style').forEach((n) => n.remove());
+              const ex = sub.querySelector(':scope > ul li');
+              add(textOf(c), ex ? textOf(ex).slice(0, 180) : '', '');
+            }
+          }
+          continue;
+        }
+        const clone = li.cloneNode(true);
+        clone.querySelectorAll('ul, ol, dl, .reference, sup, style').forEach((n) => n.remove());
+        const text = textOf(clone);
+        // The shortest of the first few examples: literary quotes can be very long.
+        const exs = [...li.querySelectorAll(':scope > ul .example q')].slice(0, 4);
+        if (!exs.length) exs.push(...[li.querySelector(':scope > ul .example, :scope > dl dd, :scope > ul li')].filter(Boolean));
+        let example = exs.map((x) => textOf(x).replace(/\s*—.*$/, '')).sort((a, b) => a.length - b.length)[0] || '';
+        if (example.length > 180) example = `${example.slice(0, 177)}…`;
+        const links = [...clone.querySelectorAll('a[title]')].filter((a) => !a.getAttribute('title').includes(':'));
+        add(text, example, isFormHeading() && links.length ? links.at(-1).getAttribute('title') : '');
+      }
+    } else if (el.tagName === 'DL' && el.querySelector(':scope > dd') && (
+      el.querySelector(':scope > dt') || // es.wiktionary: <dt>1</dt><dd>…</dd>
+      /^(bedeutungen|significados?|significato|betekenissen?)\s*:?$/i.test(textOf(el.previousElementSibling || el)) // de.wiktionary
+    )) {
+      for (const dd of el.querySelectorAll(':scope > dd')) {
+        const clone = dd.cloneNode(true);
+        clone.querySelectorAll('ul, ol, dl, .reference, sup, style').forEach((n) => n.remove());
+        add(textOf(clone).replace(/^\[\d+[a-z]?\]\s*/, ''), '', '');
+      }
+    }
+  }
+  return entries;
+}
+
+async function monolingualFetch(term, lang) {
+  const api = `https://${lang}.wiktionary.org/w/api.php`;
+  const q = (params) => fetchJson(`${api}?${new URLSearchParams({ format: 'json', formatversion: '2', redirects: '1', origin: '*', ...params })}`);
+  const name = endonym(lang).toLocaleLowerCase(lang);
+  for (const page of [...new Set([term, term.toLocaleLowerCase(lang)])]) {
+    const s = await q({ action: 'parse', page, prop: 'sections' });
+    if (s === null) return undefined; // couldn't reach Wiktionary (offline): don't cache a "not found"
+    const sections = s?.parse?.sections;
+    if (!sections) continue;
+    const plain = (line) => line.replace(/<[^>]+>/g, '').toLocaleLowerCase(lang);
+    const sec = sections.find((x) => x.toclevel === 1 && plain(x.line).includes(name))
+      || sections.find((x) => plain(x.line).includes(name));
+    if (!sec) continue;
+    const t = await q({ action: 'parse', page, section: sec.index, prop: 'text' });
+    const entries = t?.parse?.text ? parseMonolingual(t.parse.text) : [];
+    if (entries.length) return { source: `${lang}.wiktionary.org`, url: `https://${lang}.wiktionary.org/wiki/${encodeURIComponent(page)}`, entries };
+  }
+  return null;
+}
+
+// -> {source, url, entries} | null (cached for 60 days, negative results too)
+export async function monolingual(term, lang) {
+  if (window.__lingoMono) return window.__lingoMono(term, lang); // smoke-test hook
+  const key = `m|${lang}|${term.toLocaleLowerCase()}`;
+  const cached = await db.get('dict', key);
+  if (cached && Date.now() - cached.at < CACHE_DAYS * 864e5) return cached.value;
+  const value = await monolingualFetch(term, lang).catch(() => undefined);
+  if (value === undefined) return null;
+  await db.put('dict', { key, value, at: Date.now() });
+  return value;
+}
+
 export function externalLinks(term, lang, native) {
   const q = encodeURIComponent(term);
   return [

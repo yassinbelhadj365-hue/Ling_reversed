@@ -4,7 +4,7 @@
 // you're learning (simple words, examples), then — only when you press "Show English" —
 // translations, English explanations and the bilingual dictionary.
 import { state, lang, langName, getWord, setStatus, saveWord, undoAuto, speak, esc, toast, statusOf } from './state.js';
-import { lookup, lookupExpression, externalLinks } from './dict.js';
+import { lookup, lookupExpression, externalLinks, monolingual } from './dict.js';
 import { NEW, KNOWN, IGNORED, isLearning } from './srs.js';
 import { progress } from './knowledge.js';
 import { translateSentence, rankByContext, sentenceLinks, ERROR_TEXT } from './translate.js';
@@ -29,6 +29,7 @@ export function openPanel(term, {
   current = {
     term, mode, context, mark, around, flag, transcript, onFlag, onChange, onClose,
     showEnglish: !!state.settings.showEnglish,
+    mono: mode === 'word' ? { state: 'loading' } : null, // dictionary in the target language
     defs: null, tr: null, expr: null, list: [],
     explain: null, deep: null, handoff: null,
   };
@@ -38,6 +39,7 @@ export function openPanel(term, {
   loadExplain();
   if (mode === 'word') {
     rememberContext();
+    loadMono();
     loadDefs();
     loadExpression();
   }
@@ -94,6 +96,15 @@ async function loadSentence() {
   me.tr = tr || { error: 'unavailable' };
   renderDynamic();
   rememberContext();
+}
+
+async function loadMono() {
+  const me = current;
+  let value = null;
+  try { value = await monolingual(me.term, lang()); } catch { /* offline */ }
+  if (!stillOpen(me)) return;
+  me.mono = { state: 'done', value };
+  renderDynamic();
 }
 
 async function loadDefs() {
@@ -254,21 +265,54 @@ function answerHtml(x, slot) {
   </div>`;
 }
 
+// The dictionary written in the target language (Wiktionary of that language).
+function monoHtml() {
+  const m = current.mono;
+  if (!m) return '';
+  if (m.state === 'loading') return `<p class="small muted">Looking it up in the ${esc(L())} dictionary…</p>`;
+  if (!m.value) return '';
+  let k = 0;
+  const forms = new Set();
+  const body = m.value.entries.map((e) => `
+    ${e.pos ? `<div class="small muted mono-pos" dir="auto">${esc(e.pos)}</div>` : ''}
+    <ol class="mono-defs">${e.defs.map((d) => {
+      if (d.formOf) forms.add(d.formOf);
+      return `<li dir="auto"><span class="mono-def" data-mono="${k++}" title="Use as hint">${esc(d.text)}</span>
+        ${d.example ? `<div class="mono-ex" dir="auto">« ${esc(d.example)} »</div>` : ''}</li>`;
+    }).join('')}</ol>`).join('');
+  return `<div class="mono">
+    ${body}
+    <div class="row small">
+      ${[...forms].map((f) => `<button class="btn small" data-open="${esc(f)}">Open “${esc(f)}”</button>`).join('')}
+      <a href="${esc(m.value.url)}" target="_blank" rel="noopener" class="muted">${esc(m.value.source)}</a>
+    </div></div>`;
+}
+
 function explainHtml() {
   const x = current.explain;
+  const hasDict = !!current.mono?.value;
   const label = `<div class="small muted">Explanation in ${esc(L())}</div>`;
-  if (!x) return '';
-  if (x.state === 'loading') {
-    return `${label}<p class="small muted">${x.progress != null && x.progress < 1
-      ? `Downloading Chrome’s AI model (one time)… ${Math.round(x.progress * 100)}%` : 'Explaining…'}</p>`;
-  }
-  if (x.state === 'idle') return `${label}<button class="btn small" data-act="explain">Explain in ${esc(L())}</button>`;
-  if (x.state === 'none') {
-    return `${label}<p class="small muted">No free AI is set up for automatic explanations yet. Add a free OpenRouter key in
-      Settings (or use Chrome, which has one built in), or ask DeepSeek or ChatGPT below.</p>`;
-  }
-  if (x.state === 'error') return `${label}<p class="small">${esc(x.msg)}</p><button class="btn small" data-act="explain">Try again</button>`;
-  return `${label}${answerHtml(x, 'explain')}`;
+  const ai = (() => {
+    if (!x) return '';
+    if (x.state === 'loading') {
+      return `<p class="small muted">${x.progress != null && x.progress < 1
+        ? `Downloading Chrome’s AI model (one time)… ${Math.round(x.progress * 100)}%` : 'Explaining this sentence…'}</p>`;
+    }
+    if (x.state === 'idle') return `<button class="btn small" data-act="explain">Explain it in this sentence</button>`;
+    if (x.state === 'none') {
+      return hasDict
+        ? `<p class="small muted">For an explanation of <i>this exact sentence</i>, add a free OpenRouter key in Settings, or ask below.</p>`
+        : `<p class="small muted">No free AI is set up for automatic explanations yet. Add a free OpenRouter key in
+          Settings (or use Chrome, which has one built in), or ask DeepSeek or ChatGPT below.</p>`;
+    }
+    if (x.state === 'error') return `<p class="small">${esc(x.msg)}</p><button class="btn small" data-act="explain">Try again</button>`;
+    return `<div class="small muted">In this sentence</div>${answerHtml(x, 'explain')}`;
+  })();
+  return `${label}${monoHtml()}${ai}`;
+}
+
+function monoDef(i) {
+  return current.mono?.value?.entries.flatMap((e) => e.defs)[i]?.text || '';
 }
 
 function englishHtml() {
@@ -443,8 +487,9 @@ async function handoff(site) {
 
 panel.addEventListener('click', (e) => {
   if (!current) return;
-  const t = e.target.closest('button, li[data-def]');
+  const t = e.target.closest('button, li[data-def], [data-mono]');
   if (!t) return;
+  if (t.dataset.mono !== undefined) return saveHint(monoDef(Number(t.dataset.mono)));
   const act = t.dataset.act;
   const slotAnswer = () => current[t.dataset.slot]?.result;
   if (act === 'close') return closePanel();

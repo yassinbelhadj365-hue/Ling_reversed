@@ -30,9 +30,20 @@ export async function listModels() {
     .sort((a, b) => rank(a) - rank(b) || a.id.localeCompare(b.id));
 }
 
-export async function defaultModel() {
-  if (isFree(state.settings.assistModel)) return state.settings.assistModel;
-  try { return (await listModels())[0]?.id || PREFERRED_FREE[0]; } catch { return PREFERRED_FREE[0]; }
+// Smaller, faster free models for the quick explanation on every tap.
+const PREFERRED_QUICK = ['google/gemma-4-26b-a4b-it:free', 'nvidia/nemotron-3-super-120b-a12b:free', 'google/gemma-4-31b-it:free'];
+
+// tier 'deep' ("Still unclear?") -> settings.assistModel; tier 'quick' -> settings.quickModel.
+export async function defaultModel(tier = 'deep') {
+  const chosen = tier === 'quick' ? state.settings.quickModel : state.settings.assistModel;
+  if (isFree(chosen)) return chosen;
+  const prefs = tier === 'quick' ? PREFERRED_QUICK : PREFERRED_FREE;
+  try {
+    const ids = (await listModels()).map((m) => m.id);
+    return prefs.find((id) => ids.includes(id)) || ids[0] || prefs[0];
+  } catch {
+    return prefs[0];
+  }
 }
 
 // Lenient JSON: models sometimes wrap it in ``` fences or add reasoning before it.
@@ -46,11 +57,11 @@ export function parseJsonReply(text) {
 
 // One request to a free OpenRouter model that answers in JSON.
 // -> {result, model} ; throws Error with a user-facing message.
-export async function openRouterJson({ system, user }) {
-  if (window.__lingoAssist) return window.__lingoAssist({ system, user }); // smoke-test hook
+export async function openRouterJson({ system, user, tier = 'deep' }) {
+  if (window.__lingoAssist) return window.__lingoAssist({ system, user, tier }); // smoke-test hook
   const key = await getKey();
   if (!key) throw new Error('Add your free OpenRouter key in Settings first.');
-  const model = await defaultModel();
+  const model = await defaultModel(tier);
   if (!isFree(model)) throw new Error('Only free models are allowed. Pick one in Settings.'); // never spend money
   let res;
   try {
