@@ -321,6 +321,7 @@ let toastTimer;
 // action: optional {label, onClick} rendered as a button inside the toast.
 export function toast(msg, ms = 2600, action = null) {
   const el = document.getElementById('toast');
+  if (!el) return;
   el.textContent = msg;
   if (action) {
     const b = Object.assign(document.createElement('button'), { className: 'toast-action', textContent: action.label });

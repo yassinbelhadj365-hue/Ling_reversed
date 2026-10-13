@@ -10,6 +10,7 @@ import { renderSettings } from './views/settings.js';
 import { renderAccount } from './views/account.js';
 import * as db from './db.js';
 import { activeAccount, startSync, onStatus } from './cloud.js';
+import { startRelay } from './relay.js';
 
 const VIEWS = {
   account: renderAccount,
@@ -69,7 +70,18 @@ function showAccount(st) {
   btn.title = acc ? `${acc.email} — ${st?.state === 'ok' ? 'synced' : st?.state || ''}${st?.error ? `: ${st.error}` : ''}` : 'Not synced — tap to create an account';
 }
 
+// Android "Share → Lingo Reader" opens ./?title=…&text=…&url=… (manifest share_target).
+function takeShareTarget() {
+  const q = new URLSearchParams(location.search);
+  if (!q.has('text') && !q.has('url')) return;
+  try {
+    sessionStorage.setItem('lingo-share', JSON.stringify({ title: q.get('title') || '', text: q.get('text') || '', url: q.get('url') || '' }));
+  } catch { /* storage blocked */ }
+  history.replaceState(null, '', `${location.pathname}#/import`);
+}
+
 async function init() {
+  takeShareTarget();
   measureChrome();
   window.addEventListener('resize', measureChrome);
   const account = activeAccount();
@@ -94,6 +106,8 @@ async function init() {
     ]);
     await loadSettings();
     await loadVocab();
+    // Imports a phone asked this computer to do, and lessons coming back to the phone.
+    startRelay({ onChange: () => { if (/^#\/library/.test(location.hash) || !location.hash) route(); } });
   }
 
   langSelect.innerHTML = LANGS.map(([code, name]) => `<option value="${code}">${name}</option>`).join('');

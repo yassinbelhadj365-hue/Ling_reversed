@@ -77,9 +77,13 @@ a good estimate of how comfortably you can read/listen to it.
 
 **Importing YouTube:** paste a video link on the Import screen and the transcript and title load
 automatically, in the language you're studying. You can pick another caption track if there are several.
-Auto-generated captions work too, with per-word timing. This needs the app running from
-**Start Lingo Reader** / `serve.ps1`, because browsers can't read YouTube captions on their own. On a phone or a
-static host, copy the transcript from YouTube's *Show transcript* panel instead, or upload an `.srt`/`.vtt` file.
+Auto-generated captions work too, with per-word timing. Downloading from YouTube needs a computer running
+**Start Lingo Reader** / `serve.ps1`, because YouTube refuses requests from other websites.
+
+**On a phone:** log in to the same account on the phone and the computer. Paste the link (or use *Share → Lingo Reader*
+from the YouTube app on Android) and press **Import**. The next time Lingo Reader is open on your computer, it fetches the
+transcript (or transcribes the audio with AI), and the lesson appears in the phone's Library. You can also paste a
+transcript by hand or upload an `.srt`/`.vtt` file.
 
 **Keyboard (desktop):** in the word panel `1`–`4` set level, `K` known, `X` ignore, `Esc`
 close. In review: `Space` reveal, `1`–`4` grade, `K` known.

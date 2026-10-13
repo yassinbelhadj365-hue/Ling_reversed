@@ -1,22 +1,16 @@
-import * as db from '../db.js';
-import { newLessonId } from '../db.js';
-import { state, lang, langName, statusOf, addLessonToPool, esc, toast, plural } from '../state.js';
-import { parseAny, mergeCues, countWords, htmlToText, youTubeId } from '../text.js';
+import { state, lang, langName, statusOf, esc, toast, plural } from '../state.js';
+import { htmlToText, youTubeId } from '../text.js';
 import { fetchYouTubeAudio, decodeAudio, transcribe, toVtt, progressText, AUDIO_ERRORS } from '../asr.js';
+import { prepare, createLesson, fetchTranscript as serverTranscript, serverCaps, canRelay, requestImport } from '../relay.js';
 import { NEW } from '../srs.js';
 
-function prepare(raw, filename, merge) {
-  const { segments, timed } = parseAny(raw, filename);
-  const segs = timed && merge ? mergeCues(segments) : segments;
-  const { counts, total } = countWords(segs, lang());
-  return { segments: segs, timed, counts, total };
-}
-
-function firstLine(text) {
-  // The first line of actual text: skip subtitle headers, cue numbers and timing lines.
-  const line = text.trim().split('\n').find((l) => l.trim()
-    && !/^[\d:.,\s\-–>\[\]]+$/.test(l) && !l.includes('-->') && !/^(WEBVTT|Kind:|Language:|NOTE\b)/.test(l.trim())) || 'Untitled';
-  return line.trim().slice(0, 70);
+// A link or text shared into the app (Android: Share → Lingo Reader), stored by app.js.
+function takeShared() {
+  try {
+    const s = sessionStorage.getItem('lingo-share');
+    sessionStorage.removeItem('lingo-share');
+    return s ? JSON.parse(s) : null;
+  } catch { return null; }
 }
 
 export async function renderImport(view) {
@@ -31,14 +25,15 @@ export async function renderImport(view) {
         </div>
         <span class="small muted" id="yt-status" aria-live="polite">Paste a link and the transcript is fetched automatically.</span>
         <select id="yt-track" hidden aria-label="Caption track"></select>
-        <div class="row"><button class="btn small" id="ai-yt" type="button" title="Listen to the video's audio and write the transcript with AI (on this computer)">🎙 Transcribe the audio with AI instead</button></div>
+        <div class="row"><button class="btn small" id="ai-yt" type="button" title="Listen to the video's audio and write the transcript with AI">🎙 Transcribe the audio with AI instead</button></div>
       </div>
       <div class="field">
         <label for="title">Title</label>
         <input id="title" type="text" placeholder="Optional — defaults to the video title, file name or first line">
       </div>
       <div class="field">
-        <label for="text">Transcript or text</label>
+        <div class="row spread"><label for="text">Transcript or text</label>
+          <button class="btn small" id="paste" type="button">📋 Paste</button></div>
         <textarea id="text" placeholder="Paste a YouTube transcript, the contents of an .srt/.vtt file, an article, song lyrics…"></textarea>
       </div>
       <div class="field">
@@ -57,38 +52,52 @@ export async function renderImport(view) {
       <p id="preview" class="small muted" aria-live="polite"></p>
       <button class="btn primary" id="go">Import</button>
     </div>
-    <details class="card">
-      <summary><b>Transcript didn’t load?</b></summary>
-      <p class="small">Automatic transcripts work when the app runs from <b>Start Lingo Reader</b> on your computer
-        (browsers can’t read YouTube captions on their own, so the app’s local server fetches them).
-        On a phone or the online version, copy it by hand:</p>
+    <details class="card" id="help">
+      <summary><b>On a phone? / Transcript didn’t load?</b></summary>
+      <p class="small">Only a <b>computer</b> running <b>Start Lingo Reader</b> can download from YouTube (YouTube refuses
+        requests from other websites, and phones can’t run the helper). There are three ways to import on your phone:</p>
       <ol class="small">
-        <li>Open the video on YouTube (desktop browser), click <b>…more</b> under the title, then <b>Show transcript</b>.</li>
-        <li>Select all of the transcript text (timestamps included), copy it, and paste it in the box above.</li>
+        <li><b>Let your computer do it (easiest).</b> Log in to the same account on your phone and computer (top right,
+          see <i>Account</i>). Paste the link here and press <b>Import</b>. Next time Lingo Reader is open on your
+          computer, it fetches the transcript (or transcribes it with AI). The lesson then appears in your phone’s Library.</li>
+        <li><b>Same Wi-Fi:</b> start the app on your computer with <code>serve.ps1 -Lan</code> and open the address it
+          prints on your phone. Then everything works directly, like on the computer.</li>
+        <li><b>By hand:</b> open the video in your phone’s browser, choose <i>Desktop site</i> in the menu, tap <b>…more</b> under
+          the title, then <b>Show transcript</b>. Select the transcript text, copy it, and paste it above (📋 Paste).
+          Subtitle files (.srt/.vtt) work too.</li>
       </ol>
-      <p class="small muted">You can also upload .srt/.vtt subtitle files.</p>
+      <p class="small muted">On Android, after installing the app you can also use <b>Share → Lingo Reader</b> from the YouTube app.</p>
     </details>`;
 
   const $ = (s) => view.querySelector(s);
 
   // ---------- automatic YouTube transcripts (served by serve.ps1's /api/transcript) ----------
-  const status = (msg) => { $('#yt-status').textContent = msg; };
+  const status = (msg, html = false) => { $('#yt-status')[html ? 'innerHTML' : 'textContent'] = msg; };
   const trackLabel = (t) => `${t.name}${t.kind === 'auto' && !/auto/i.test(t.name) ? ' (auto-generated)' : ''}`;
   let fetchedFor = null;
+  let noServer = false; // this device can't download from YouTube
+
+  function explainNoServer() {
+    noServer = true;
+    if (canRelay()) {
+      status('This device can’t download from YouTube itself. Press <b>Import</b>: your computer will get the transcript the next time Lingo Reader is open there, and the lesson will appear in your Library.', true);
+    } else {
+      status('This device can’t download from YouTube itself (only a computer running Start Lingo Reader can). '
+        + '<a href="#/account">Log in to your account</a> on this phone and your computer, then your computer can do it for you. '
+        + 'Or paste the transcript below — see “On a phone?” at the bottom.', true);
+    }
+  }
 
   async function fetchTranscript(track = '') {
     const id = youTubeId($('#yt').value.trim());
     if (!id) return status('That doesn’t look like a YouTube video link.'), false;
     status('Getting the transcript…');
     $('#yt-fetch').disabled = true;
-    let r = null;
-    try {
-      const res = await fetch(`api/transcript?v=${id}&lang=${lang()}${track !== '' ? `&track=${track}` : ''}`);
-      r = res.headers.get('content-type')?.includes('json') ? await res.json() : null;
-    } catch { /* no local server */ }
+    const r = await serverTranscript(id, lang(), track);
+    if (!$('#yt-fetch')) return false; // the import screen was left in the meantime
     $('#yt-fetch').disabled = false;
     if (!r) {
-      status('Automatic transcripts need the app running from Start Lingo Reader on your computer. Paste the transcript below instead.');
+      explainNoServer();
       return false;
     }
     const sel = $('#yt-track');
@@ -113,6 +122,17 @@ export async function renderImport(view) {
     fetchedFor = id;
     status(`✓ Loaded “${trackLabel(r.track)}” captions.${r.track.kind === 'auto' ? ' Auto-generated captions may contain mistakes.' : ''}`);
     return true;
+  }
+
+  // Ask the computer (through the synced account) to do it.
+  async function relay(kind) {
+    const url = $('#yt').value.trim();
+    const videoId = youTubeId(url);
+    await requestImport({ kind, videoId, url, title: $('#title').value.trim(), track: $('#yt-track').value || '', merge: $('#merge').checked });
+    toast(kind === 'asr'
+      ? 'Sent to your computer — it will transcribe the video with AI next time Lingo Reader is open there.'
+      : 'Sent to your computer — the lesson will appear in your Library when it’s fetched.', 6000);
+    location.hash = '#/library';
   }
 
   // ---------- AI transcription (Whisper on this device) ----------
@@ -144,9 +164,13 @@ export async function renderImport(view) {
       btns.forEach((b) => { b.disabled = false; });
     }
   }
-  $('#ai-yt').addEventListener('click', () => {
+  $('#ai-yt').addEventListener('click', async () => {
     const id = youTubeId($('#yt').value.trim());
     if (!id) return status('Paste a YouTube link first.');
+    if (!(await serverCaps()).transcripts) {
+      if (canRelay()) return relay('asr');
+      return explainNoServer();
+    }
     aiTranscribe(() => fetchYouTubeAudio(id));
   });
   $('#media').addEventListener('change', () => { $('#ai-file').hidden = !$('#media').files[0]; });
@@ -156,8 +180,22 @@ export async function renderImport(view) {
   });
   $('#text').addEventListener('input', (e) => { if (e.isTrusted) aiMade = false; });
 
+  $('#paste').addEventListener('click', async () => {
+    let clip = '';
+    try { clip = await navigator.clipboard.readText(); } catch { /* permission refused or unsupported */ }
+    if (!clip) return toast('Couldn’t read the clipboard — long-press the box and choose Paste.');
+    const id = youTubeId(clip.trim());
+    if (id && clip.trim().split(/\s+/).length === 1) {
+      $('#yt').value = clip.trim();
+      $('#yt').dispatchEvent(new Event('input'));
+    } else {
+      $('#text').value = clip;
+      $('#text').dispatchEvent(new Event('input'));
+    }
+  });
+
   $('#yt-fetch').addEventListener('click', () => fetchTranscript());
-  $('#yt-track').addEventListener('change', (e) => { if (e.target.value !== '') fetchTranscript(e.target.value); });
+  $('#yt-track').addEventListener('change', (e) => { if (e.target.value !== '' && !noServer) fetchTranscript(e.target.value); });
   $('#yt').addEventListener('input', () => {
     const id = youTubeId($('#yt').value.trim());
     if (id && id !== fetchedFor && !$('#text').value.trim()) fetchTranscript();
@@ -184,11 +222,14 @@ export async function renderImport(view) {
     const ytUrl = $('#yt').value.trim();
     const ytId = youTubeId(ytUrl);
     if (ytUrl && !ytId) return toast('That doesn’t look like a YouTube video link.');
-    if (ytId && !$('#text').value.trim() && !$('#files').files.length && !(await fetchTranscript())) return;
+    if (ytId && !$('#text').value.trim() && !$('#files').files.length && !(await fetchTranscript())) {
+      if (noServer && canRelay()) relay('transcript');
+      return;
+    }
 
     const items = [];
     const text = $('#text').value;
-    if (text.trim()) items.push({ title: $('#title').value.trim() || firstLine(text), raw: text, filename: '' });
+    if (text.trim()) items.push({ title: $('#title').value.trim(), raw: text, filename: '' });
     for (const f of $('#files').files) {
       let raw = await f.text();
       if (/\.html?$/i.test(f.name)) raw = htmlToText(raw);
@@ -203,24 +244,16 @@ export async function renderImport(view) {
     const mediaFile = $('#media').files[0];
     try {
       for (const [i, item] of items.entries()) {
-        const p = prepare(item.raw, item.filename, $('#merge').checked);
-        if (!p.total) continue;
-        const lesson = {
-          lang: lang(), title: item.title, kind: p.timed ? 'transcript' : 'text', asr: i === 0 && !item.filename && aiMade,
+        const r = await createLesson({
+          raw: item.raw, filename: item.filename, title: item.title, merge: $('#merge').checked,
+          asr: i === 0 && !item.filename && aiMade,
           source: i === 0 && ytUrl ? ytUrl : item.filename,
           youtubeId: i === 0 ? ytId : null,
-          segments: p.segments, words: p.counts, wordCount: p.total,
-          createdAt: Date.now(), openedAt: 0, page: 0, completed: false,
-        };
-        lesson.id = newLessonId();
-        const withMedia = i === 0 && mediaFile && !ytId;
-        if (withMedia) {
-          lesson.hasMedia = true;
-          await db.put('media', { lessonId: lesson.id, blob: mediaFile, type: mediaFile.type, updatedAt: Date.now() });
-        }
-        await db.put('lessons', lesson);
-        newWords += await addLessonToPool(lesson);
-        lastId = lesson.id;
+          media: i === 0 && mediaFile && !ytId ? mediaFile : null,
+        });
+        if (!r) continue;
+        newWords += r.newWords;
+        lastId = r.lesson.id;
         made++;
       }
     } finally {
@@ -231,4 +264,19 @@ export async function renderImport(view) {
     toast(`Imported ${plural(made, 'lesson')} · ${plural(newWords, 'new word')} added to your pool`, 4000);
     location.hash = made === 1 ? `#/lesson/${lastId}` : '#/library';
   });
+
+  // Something shared into the app.
+  const shared = takeShared();
+  if (shared) {
+    const link = (shared.url || shared.text || '').match(/https?:\/\/\S+/)?.[0] || '';
+    if (youTubeId(link)) {
+      $('#yt').value = link;
+      if (shared.title && !/^https?:/.test(shared.title)) $('#title').value = shared.title;
+      $('#yt').dispatchEvent(new Event('input'));
+    } else if (shared.text) {
+      $('#text').value = shared.text;
+      if (shared.title) $('#title').value = shared.title;
+      $('#text').dispatchEvent(new Event('input'));
+    }
+  }
 }

@@ -575,6 +575,17 @@ try {
   W().fetch = realFetch;
   delete W().__lingoASR;
 
+  // ---- on a phone (no transcript server), not signed in: explain what to do ----
+  W().fetch = async (url, ...rest) => String(url).startsWith('api/')
+    ? new Response('Not found', { status: 404, headers: { 'content-type': 'text/plain' } }) : realFetch(url, ...rest);
+  W().location.hash = '#/import';
+  await until(() => D().getElementById('yt') && !D().getElementById('text').value);
+  D().getElementById('yt').value = 'https://youtu.be/dQw4w9WgXcQ';
+  D().getElementById('yt').dispatchEvent(new Event('input'));
+  await until(() => /can’t download/.test(D().getElementById('yt-status').textContent));
+  ok(D().querySelector('#yt-status a[href="#/account"]') && D().getElementById('help'), 'without a server, the phone explains how to import (account link, help)');
+  W().fetch = realFetch;
+
   // ---- database v1 -> v2 migration (unique lesson ids, per-device activity) ----
   await new Promise((resolve, reject) => {
     const req = indexedDB.open('lingo-reader-migtest', 1);
@@ -676,6 +687,72 @@ try {
   db.useDatabase(`${acc.id}-B`);
   await cloud.syncNow();
   ok(!(await db.get('lessons', 'lA')), 'a lesson deleted on the computer disappears from the phone');
+
+  // ---- a phone asks the computer to fetch a YouTube transcript (through the synced account) ----
+  const relay = await import('../js/relay.js');
+  const savedDevice = localStorage.getItem('lingo-device');
+  let serverUp = false;
+  const ytCalls = [];
+  window.fetch = (url, opts) => {
+    const s = String(url);
+    if (s.startsWith('https://fake.supabase.test')) return server(url, opts);
+    if (s.startsWith('api/')) {
+      if (!serverUp) return Promise.resolve(new Response('Not found', { status: 404, headers: { 'content-type': 'text/plain' } }));
+      if (s.startsWith('api/capabilities')) return Promise.resolve(new Response(JSON.stringify({ transcripts: true, audio: false }), { headers: { 'content-type': 'application/json' } }));
+      ytCalls.push(s);
+      const body = /track=1/.test(s)
+        ? { ok: true, title: 'Desde el ordenador', vtt: AUTO_VTT, track: { index: 1, lang: 'es', kind: 'auto', name: 'Spanish (auto)' } }
+        : { ok: false, error: 'no-track', title: 'Desde el ordenador', tracks: [{ index: 0, lang: 'en', kind: 'manual', name: 'English' }, { index: 1, lang: 'es', kind: 'auto', name: 'Spanish (auto)' }] };
+      return Promise.resolve(new Response(JSON.stringify(body), { headers: { 'content-type': 'application/json' } }));
+    }
+    return pageFetch(url, opts);
+  };
+  // Let background syncs finish before switching to the other device's database.
+  const idle = async () => { await cloud.syncNow(); while (cloud.status.state === 'syncing') await sleep(20); };
+  const asDevice = async (name, dbSuffix, up) => {
+    await idle();
+    relay._resetRelay();
+    localStorage.setItem('lingo-device', name);
+    db.useDatabase(`${acc.id}-${dbSuffix}`);
+    serverUp = up;
+    await idle();
+  };
+  await asDevice('devPhone', 'B', false);
+  ok(relay.canRelay() && !(await relay.serverCaps()).transcripts, 'the phone has no transcript server but can ask its computer');
+  const job = await relay.requestImport({ kind: 'transcript', videoId: 'dQw4w9WgXcQ', url: 'https://youtu.be/dQw4w9WgXcQ', title: '', track: '', merge: true });
+  await cloud.syncNow();
+  ok(/Waiting for your computer/.test(relay.jobStatusText(job)), 'the request waits for the computer');
+  await asDevice('devPC', 'A', true);
+  await relay.processRelay();
+  let pcJob = (await relay.jobs()).find((j) => j.id === job.id);
+  ok(pcJob?.status === 'error' && pcJob.error === 'no-track' && pcJob.tracks?.length === 2, 'the computer reports when there are no captions in the language, with the other tracks');
+  await cloud.syncNow();
+  await asDevice('devPhone', 'B', false);
+  await relay.processRelay();
+  ok((await relay.myJobs())[0]?.status === 'error', 'the phone sees the error');
+  await relay.retryJob(job.id, { track: '1' });
+  await cloud.syncNow();
+  await asDevice('devPC', 'A', true);
+  await relay.processRelay();
+  pcJob = (await relay.jobs()).find((j) => j.id === job.id);
+  ok(pcJob?.status === 'ready' && /WEBVTT/.test(pcJob.vtt) && ytCalls.at(-1).includes('track=1'), 'with another track chosen, the computer fetches the transcript');
+  ok(!(await db.all('lessons')).some((l) => l.youtubeId === 'dQw4w9WgXcQ'), 'the computer doesn’t import it itself');
+  await cloud.syncNow();
+  await asDevice('devPhone', 'B', false);
+  await relay.processRelay();
+  const relayed = (await db.all('lessons')).find((l) => l.youtubeId === 'dQw4w9WgXcQ');
+  ok(relayed?.title === 'Desde el ordenador' && relayed.segments.length === 1 && relayed.segments[0].marks?.length === 5,
+    'the lesson appears on the phone, timed, with the video title');
+  await idle();
+  const poolWord = await db.get('words', 'es|bienvenidos'), leftJobs = await relay.myJobs();
+  ok(poolWord?.lessons?.includes(relayed.id) && !leftJobs.length,
+    'its words join the phone’s pool and the request is cleared ' + JSON.stringify([poolWord?.lessons, relayed.id, leftJobs.map((j) => j.status)]));
+  await cloud.syncNow();
+  await asDevice('devPC', 'A', true);
+  ok((await db.all('lessons')).some((l) => l.id === relayed.id) && !(await relay.jobs()).length, 'the lesson syncs back to the computer; the request is gone');
+  relay._resetRelay();
+  savedDevice === null ? localStorage.removeItem('lingo-device') : localStorage.setItem('lingo-device', savedDevice);
+  window.fetch = (url, opts) => (String(url).startsWith('https://fake.supabase.test') ? server(url, opts) : pageFetch(url, opts));
 
   // a second account has its own separate data
   const acc2 = await cloud.signUp('ben@example.com', 'secret2', 'Ben');

@@ -87,6 +87,8 @@ Local audio/video blobs live in the `media` store, keyed by `lessonId`, and are 
   - DeepSeek: the question is copied, because the site can't be prefilled.
 - The OpenRouter key lives in kv `secret:openrouter`. It is never synced or backed up.
 
+**Importing on a phone** (`js/relay.js`): phones and static hosting have no `serve.ps1`, and YouTube refuses cross-origin requests (public Invidious/Piped mirrors were tried; they return empty captions). A signed-in device without a server leaves a request in the synced kv store (`job:<id>`: `{kind: 'transcript'|'asr', videoId, lang, track, status: pending→working→ready|error, vtt}`). Any device whose `api/capabilities` says `transcripts` picks it up after a sync (it syncs every 20 s while open, even in the background) and writes the VTT back. The requesting device (`from === deviceId()`) then creates the lesson itself via `createLesson` (shared with the Import view), so the words join its pool, and deletes the request. The Library lists pending requests (cancel, retry, another track, AI instead). `processRelay()` runs one pass; tests drive it directly. The manifest's `share_target` (Android "Share → Lingo Reader") arrives as `./?text=…`; `app.js` stashes it in sessionStorage for the Import view. The service worker never caches `/api/`.
+
 **AI transcription** (`js/asr.js` + `js/asr-worker.js`): Whisper via transformers.js 3.8.1 (the self-contained `transformers.min.js` build; the `.web` build has bare imports).
 - It uses WebGPU only when `requestAdapter()` succeeds, otherwise WASM in a fresh worker.
 - Audio is transcribed in 2-minute blocks cut at quiet points. The result becomes a WebVTT transcript.
