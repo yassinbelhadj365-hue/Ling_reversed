@@ -76,7 +76,9 @@ Local audio/video blobs live in the `media` store, keyed by `lessonId`, and are 
 - Tests stub these with `window.__lingoTranslate`, `__lingoDict`, `__lingoExpr`, `__lingoAI`, `__lingoAssist` and `__lingoASR`.
 
 **Panel** (`js/panel.js`) has two modes: `word` (a word or a phrase of up to 10 words) and `selection` (a longer passage or several lines, also opened by the 💬 line button).
-- Order: the sentence, then the **explanation in the target language** (`#explain-area`), then levels and hint. Everything in the native language — translations, English explanations, the bilingual dictionary — is behind "Show English" (`#english-area`), unless `settings.showEnglish` is on.
+- Order: the sentence, then the **explanation in the target language** (`#explain-area`), then levels and hint.
+  - The explanation starts with the monolingual dictionary (`dict.monolingual()`). It reads the target language's own Wiktionary (only the section for that language) through `parseMonolingual`, which handles the markup of the fr, es, de, it and pt editions.
+  - Below the dictionary comes the AI explanation of this sentence. Gemini Nano can't write French, so French falls through to the `quickModel` OpenRouter tier. Everything in the native language — translations, English explanations, the bilingual dictionary — is behind "Show English" (`#english-area`), unless `settings.showEnglish` is on.
 
 **AI explanations** (`js/explain.js`): `explain(input, {depth})` with `input = {kind: 'word' | 'passage', term, sentence, transcript}` returns `{target: {meaning, grammar, examples}, native: {…, translation}, lemma, part_of_speech, multiword_unit}`.
 - `quick` depth uses Gemini Nano (Chrome's `LanguageModel`, about 1.2k characters of transcript) and falls back to an OpenRouter free model. `deep` ("Still unclear?") uses OpenRouter with up to 30k characters of transcript.
