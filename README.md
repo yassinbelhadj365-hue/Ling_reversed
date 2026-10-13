@@ -80,7 +80,8 @@ automatically, in the language you're studying. You can pick another caption tra
 Auto-generated captions work too, with per-word timing. Downloading from YouTube needs a computer running
 **Start Lingo Reader** / `serve.ps1`, because YouTube refuses requests from other websites.
 
-**On a phone:** log in to the same account on the phone and the computer. Paste the link (or use *Share → Lingo Reader*
+**On a phone:** with the optional free cloud helper in your sync server (see [docs/SYNC_SETUP.md](docs/SYNC_SETUP.md)),
+pasting a link works on its own, though YouTube sometimes refuses it. Otherwise, or when it's refused, log in to the same account on the phone and the computer. Paste the link (or use *Share → Lingo Reader*
 from the YouTube app on Android) and press **Import**. The next time Lingo Reader is open on your computer, it fetches the
 transcript (or transcribes the audio with AI), and the lesson appears in the phone's Library. You can also paste a
 transcript by hand or upload an `.srt`/`.vtt` file.

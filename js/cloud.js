@@ -276,6 +276,25 @@ export async function fetchLessonMedia(lessonId) {
   }
 }
 
+// Call one of the sync server's Edge Functions (e.g. "transcript").
+// -> parsed JSON | null when the function isn't deployed or can't be reached.
+export async function callFunction(name, params) {
+  const cfg = cloudConfig();
+  if (!cfg) return null;
+  const acc = activeAccount();
+  let token = cfg.anonKey;
+  if (acc && isSignedIn(acc)) token = await accessToken(acc).catch(() => cfg.anonKey);
+  try {
+    const res = await fetch(`${cfg.url}/functions/v1/${name}?${new URLSearchParams(params)}`, {
+      headers: { apikey: cfg.anonKey, Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok || !res.headers.get('content-type')?.includes('json')) return null;
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
+
 // Checks that the sync server is set up (tables, function and storage exist).
 export async function testServer() {
   await api('/rest/v1/records?select=key&limit=1');

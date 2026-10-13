@@ -615,6 +615,7 @@ try {
 
   // ---- accounts + sync between two devices (in-memory stand-in for Supabase) ----
   const cloud = await import('../js/cloud.js');
+  let cloudFn = null; // the fake server's "transcript" Edge Function, when deployed
   const server = (() => {
     const users = new Map(), rows = new Map();
     let clock = 0;
@@ -640,6 +641,9 @@ try {
           if (!old || r.updated_at > old.updated_at) rows.set(k, { ...r, synced_at: new Date(Date.UTC(2026, 0, 1) + ++clock).toISOString() });
         }
         return new Response(null, { status: 204 });
+      }
+      if (u.pathname === '/functions/v1/transcript') {
+        return cloudFn && opts.headers?.Authorization?.startsWith('Bearer tok-') ? json(cloudFn(u.searchParams)) : json({ message: 'Function not found' }, 404);
       }
       if (u.pathname === '/rest/v1/records') {
         const from = u.searchParams.get('synced_at').replace('gte.', '');
@@ -719,6 +723,13 @@ try {
   };
   await asDevice('devPhone', 'B', false);
   ok(relay.canRelay() && !(await relay.serverCaps()).transcripts, 'the phone has no transcript server but can ask its computer');
+  ok(await relay.fetchTranscript('dQw4w9WgXcQ', 'es') === null && relay.cloudOutcome === 'missing', 'no cloud helper deployed: nothing fetched');
+  cloudFn = (q) => ({ ok: true, title: 'Por la nube', vtt: AUTO_VTT, track: { index: 0, lang: q.get('lang'), kind: 'auto', name: 'Spanish (auto)' }, tracks: [] });
+  const viaCloud = await relay.fetchTranscript('dQw4w9WgXcQ', 'es');
+  ok(viaCloud?.ok && viaCloud.via === 'cloud' && viaCloud.title === 'Por la nube', 'with the cloud helper, the phone fetches the transcript itself (logged-in token sent)');
+  cloudFn = () => ({ ok: false, error: 'blocked' });
+  ok(await relay.fetchTranscript('dQw4w9WgXcQ', 'es') === null && relay.cloudOutcome === 'blocked', 'when YouTube refuses the cloud helper, it falls back to asking the computer');
+  cloudFn = null;
   const job = await relay.requestImport({ kind: 'transcript', videoId: 'dQw4w9WgXcQ', url: 'https://youtu.be/dQw4w9WgXcQ', title: '', track: '', merge: true });
   await cloud.syncNow();
   ok(/Waiting for your computer/.test(relay.jobStatusText(job)), 'the request waits for the computer');

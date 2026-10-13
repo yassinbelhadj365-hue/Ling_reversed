@@ -29,6 +29,21 @@ The one exception is your OpenRouter key, which stays on each device.
 So the phone doesn't need step 5, ask Claude to put the URL and key into `js/config.js`. The anon
 key is designed to be public; row-level security keeps each account's data private.
 
+## Optional: YouTube transcripts on the phone without your computer
+
+YouTube doesn't let websites download its captions, so normally your computer fetches them
+(Start Lingo Reader). A small free "cloud helper" in the same Supabase project lets the phone try on
+its own. YouTube sometimes refuses cloud servers. When that happens, the app falls back to asking
+your computer, so nothing breaks.
+
+1. In the Supabase dashboard, open **Edge Functions** → **Deploy a new function** → **Via Editor**.
+2. Name it exactly `transcript`.
+3. Delete the sample code. Paste the whole contents of
+   [`supabase/functions/transcript/index.ts`](../supabase/functions/transcript/index.ts), then click **Deploy**.
+4. Leave **Verify JWT** on: only people logged in to your app can use it.
+
+The free plan includes 500,000 function calls a month; each transcript is one call.
+
 ## How it works
 
 - **Multiple accounts:** each account has its own data on each device. **This device only** is a

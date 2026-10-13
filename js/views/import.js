@@ -1,7 +1,7 @@
 import { state, lang, langName, statusOf, esc, toast, plural } from '../state.js';
 import { htmlToText, youTubeId } from '../text.js';
 import { fetchYouTubeAudio, decodeAudio, transcribe, toVtt, progressText, AUDIO_ERRORS } from '../asr.js';
-import { prepare, createLesson, fetchTranscript as serverTranscript, serverCaps, canRelay, requestImport } from '../relay.js';
+import { prepare, createLesson, fetchTranscript as serverTranscript, serverCaps, canRelay, requestImport, cloudOutcome } from '../relay.js';
 import { NEW } from '../srs.js';
 
 // A link or text shared into the app (Android: Share → Lingo Reader), stored by app.js.
@@ -55,8 +55,10 @@ export async function renderImport(view) {
     <details class="card" id="help">
       <summary><b>On a phone? / Transcript didn’t load?</b></summary>
       <p class="small">Only a <b>computer</b> running <b>Start Lingo Reader</b> can download from YouTube (YouTube refuses
-        requests from other websites, and phones can’t run the helper). There are three ways to import on your phone:</p>
+        requests from other websites, and phones can’t run the helper). There are a few ways to import on your phone:</p>
       <ol class="small">
+        <li><b>Cloud helper (no computer needed):</b> if you added the free <i>transcript</i> function to your sync
+          server (docs/SYNC_SETUP.md), pasting a link works directly. YouTube sometimes refuses it; then the next option kicks in.</li>
         <li><b>Let your computer do it (easiest).</b> Log in to the same account on your phone and computer (top right,
           see <i>Account</i>). Paste the link here and press <b>Import</b>. Next time Lingo Reader is open on your
           computer, it fetches the transcript (or transcribes it with AI). The lesson then appears in your phone’s Library.</li>
@@ -79,8 +81,10 @@ export async function renderImport(view) {
 
   function explainNoServer() {
     noServer = true;
+    const why = cloudOutcome === 'blocked' ? 'YouTube refused the cloud helper this time, so '
+      : cloudOutcome === 'network' ? 'The cloud helper couldn’t reach YouTube, so ' : 'This device can’t download from YouTube itself, so ';
     if (canRelay()) {
-      status('This device can’t download from YouTube itself. Press <b>Import</b>: your computer will get the transcript the next time Lingo Reader is open there, and the lesson will appear in your Library.', true);
+      status(`${why}press <b>Import</b>: your computer will get the transcript the next time Lingo Reader is open there, and the lesson will appear in your Library.`, true);
     } else {
       status('This device can’t download from YouTube itself (only a computer running Start Lingo Reader can). '
         + '<a href="#/account">Log in to your account</a> on this phone and your computer, then your computer can do it for you. '
@@ -120,7 +124,7 @@ export async function renderImport(view) {
     aiMade = false;
     if (!$('#title').value.trim() && r.title) $('#title').value = r.title;
     fetchedFor = id;
-    status(`✓ Loaded “${trackLabel(r.track)}” captions.${r.track.kind === 'auto' ? ' Auto-generated captions may contain mistakes.' : ''}`);
+    status(`✓ Loaded “${trackLabel(r.track)}” captions${r.via === 'cloud' ? ' (through your cloud helper)' : ''}.${r.track.kind === 'auto' ? ' Auto-generated captions may contain mistakes.' : ''}`);
     return true;
   }
 

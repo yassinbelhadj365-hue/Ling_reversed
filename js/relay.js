@@ -9,7 +9,7 @@ import * as db from './db.js';
 import { newLessonId, deviceId } from './db.js';
 import { state, lang, langName, addLessonToPool, toast, plural } from './state.js';
 import { parseAny, mergeCues, countWords } from './text.js';
-import { activeAccount, isSignedIn, cloudConfig, syncNow, onStatus } from './cloud.js';
+import { activeAccount, isSignedIn, cloudConfig, syncNow, onStatus, callFunction } from './cloud.js';
 import { capabilities, fetchYouTubeAudio, decodeAudio, transcribe, toVtt } from './asr.js';
 
 const PREFIX = 'job:';
@@ -57,14 +57,23 @@ export async function createLesson({ raw, filename = '', title, merge, asr = fal
 let caps = null;
 export const serverCaps = () => (caps ||= capabilities());
 
-// YouTube captions through serve.ps1 -> {ok, title, track, tracks, vtt} | {ok:false, error} | null (no server)
+// How the last cloud attempt went: '' (worked or not tried), 'missing' (no cloud helper), 'blocked', 'network'.
+export let cloudOutcome = '';
+
+// YouTube captions -> {ok, title, track, tracks, vtt, via} | {ok:false, error} | null (nothing could fetch them).
+// First serve.ps1 on this device, then the cloud helper (Supabase Edge Function "transcript").
 export async function fetchTranscript(videoId, language, track = '') {
+  const withTrack = track !== '' && track != null;
   try {
-    const res = await fetch(`api/transcript?v=${videoId}&lang=${language}${track !== '' && track != null ? `&track=${track}` : ''}`);
-    return res.headers.get('content-type')?.includes('json') ? await res.json() : null;
-  } catch {
-    return null; // no local server
-  }
+    const res = await fetch(`api/transcript?v=${videoId}&lang=${language}${withTrack ? `&track=${track}` : ''}`);
+    if (res.headers.get('content-type')?.includes('json')) return { ...(await res.json()), via: 'local' };
+  } catch { /* no local server */ }
+  const c = await callFunction('transcript', { v: videoId, lang: language, ...(withTrack ? { track } : {}) });
+  if (!c) { cloudOutcome = 'missing'; return null; }
+  // YouTube refused the cloud server (it often does): the computer can still do it.
+  if (!c.ok && (c.error === 'blocked' || c.error === 'network')) { cloudOutcome = c.error; return null; }
+  cloudOutcome = '';
+  return { ...c, via: 'cloud' };
 }
 
 // ---------- requests ----------
