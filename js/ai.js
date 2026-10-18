@@ -40,18 +40,43 @@ export async function listModels(key) {
     .sort((a, b) => rank(a.id) - rank(b.id) || a.id.localeCompare(b.id));
 }
 
-let autoModel = null;
+// This key's models, fetched once per session.
+let listed = null;
+const modelsOf = (key) => {
+  if (listed?.key !== key) listed = { key, p: listModels(key).catch((e) => { listed = null; throw e; }) };
+  return listed.p;
+};
+
 // The chosen model, else the newest stable Flash this key can use.
 export async function pickModel(key) {
   if (state.settings.geminiModel) return state.settings.geminiModel;
-  if (autoModel) return autoModel;
   try {
-    const best = (await listModels(key)).find((m) => version(m.id) && !version(m.id)[2]);
-    autoModel = best?.id || FALLBACK_MODEL;
+    return (await modelsOf(key)).find((m) => version(m.id) && !version(m.id)[2])?.id || FALLBACK_MODEL;
   } catch {
     return FALLBACK_MODEL;
   }
-  return autoModel;
+}
+
+// Each model has its own free limit. A model that used its limit up is skipped until it
+// resets (a minute, or Google's midnight in California for the daily one) and the next one
+// answers instead, so the AI runs out only when every free Flash model has.
+const spent = new Map(); // model -> when to try it again
+const MAX_MODELS = 4;
+function nextDailyReset() {
+  const d = new Date();
+  d.setUTCHours(8, 0, 0, 0); // midnight Pacific (standard time; an hour late in summer)
+  if (+d <= Date.now()) d.setUTCDate(d.getUTCDate() + 1);
+  return +d;
+}
+const isDaily = (data) => /PerDay/i.test(JSON.stringify(data.error?.details || []));
+
+// -> model ids to try, in order: the chosen or automatic one, then the other stable Flash models.
+async function modelsToTry(key) {
+  const first = await pickModel(key);
+  let rest = [];
+  try { rest = (await modelsOf(key)).map((m) => m.id).filter((id) => version(id) && id !== first); } catch { /* offline: just the first */ }
+  const open = [first, ...rest].filter((id) => !(spent.get(id) > Date.now()));
+  return (open.length ? open : [first]).slice(0, MAX_MODELS);
 }
 
 function errorText(status, msg = '') {
@@ -102,8 +127,7 @@ export function requestBody({ system, user, schema, fast = false, video = null }
   };
 }
 
-async function direct(key, req) {
-  const model = await pickModel(key);
+async function ask(key, model, req) {
   const send = (body) => fetch(`${API}/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(key)}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -121,10 +145,28 @@ async function direct(key, req) {
   } catch {
     throw new Error('Couldn’t reach the AI (offline?).');
   }
-  if (!res.ok) throw new Error(errorText(res.status, data.error?.message));
-  const text = (data.candidates?.[0]?.content?.parts || []).map((p) => p.text || '').join('');
-  return { result: parseJsonReply(text), model };
+  return { res, data };
 }
+
+// One answer with the user's own key. -> {result, model}
+export async function direct(key, req) {
+  let failed = null;
+  for (const model of await modelsToTry(key)) {
+    const { res, data } = await ask(key, model, req);
+    if (res.status === 429 || res.status === 404) {
+      spent.set(model, res.status === 404 || isDaily(data) ? nextDailyReset() : Date.now() + 60_000);
+      failed ||= { res, data };
+      continue;
+    }
+    if (!res.ok) throw new Error(errorText(res.status, data.error?.message));
+    const text = (data.candidates?.[0]?.content?.parts || []).map((p) => p.text || '').join('');
+    return { result: parseJsonReply(text), model };
+  }
+  throw new Error(errorText(failed.res.status, failed.data.error?.message));
+}
+
+// Test hook: forget the model list and the used-up models.
+export function _resetModels() { listed = null; spent.clear(); }
 
 async function shared(req) {
   const r = await callFunction('ai', {}, { body: { ...req, model: state.settings.geminiModel || '' } });

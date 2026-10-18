@@ -82,7 +82,7 @@ export async function renderSettings(view) {
         <span class="small muted">Stored only on this device, never synced or included in backups, and sent only to Google.</span></div>
       <div class="field"><label for="gm-model">Model</label>
         <select id="gm-model"><option value="">Automatic (newest free Flash model)</option></select>
-        <span class="small muted">The list needs your own key. “Lite” models are faster and have a higher free limit.</span></div>
+        <span class="small muted">The list needs your own key. “Lite” models are faster and have a higher free limit. Each model has its own free limit: when this one’s is used up, the other free Flash models answer by themselves.</span></div>
       <label class="row"><input type="checkbox" data-bool="aiAuto" ${s.aiAuto ? 'checked' : ''}>
         Ask automatically when I tap (otherwise there’s an Explain button, which saves the daily limit)</label>
       <div class="row"><button class="btn small" id="gm-test">Test</button><span id="gm-status" class="small muted"></span></div>

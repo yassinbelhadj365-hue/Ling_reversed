@@ -18,7 +18,7 @@ import { parseShortcut, pickShortcutTrack } from '../js/youtube.js';
 import { lessonLevel, lessonProgress, continueCard } from '../js/views/library.js';
 import { milestoneFor, weekStart, recapOf, checkMilestone, milestoneProgress, milestoneBarHtml } from '../js/progress.js';
 import { parseStamp } from '../js/video-ai.js';
-import { requestBody } from '../js/ai.js';
+import { requestBody, direct, _resetModels } from '../js/ai.js';
 
 // A scriptable stand-in for the YouTube/media player (js/player.js test hook).
 function makeFakePlayer() {
@@ -135,6 +135,28 @@ try {
   const models = await listModels('k');
   window.fetch = realFetchU;
   ok(models.map((m) => m.id).join() === 'gemini-2.5-flash,gemini-2.5-flash-lite,gemini-2.0-flash', 'Gemini models: newest stable Flash first, no embedding models ' + models.map((m) => m.id));
+  // A model whose free limit is used up: the next free Flash model answers, and it is skipped afterwards.
+  const asked = [];
+  window.fetch = async (url) => {
+    const u = String(url);
+    if (/\/models\?/.test(u)) return new Response(JSON.stringify({ models: [
+      { name: 'models/gemini-2.5-flash', supportedGenerationMethods: ['generateContent'] },
+      { name: 'models/gemini-2.5-flash-lite', supportedGenerationMethods: ['generateContent'] },
+      { name: 'models/gemini-2.5-pro', supportedGenerationMethods: ['generateContent'] }] }));
+    const m = /models\/([^:]+):generateContent/.exec(u)[1];
+    asked.push(m);
+    if (m === 'gemini-2.5-flash') return new Response(JSON.stringify({ error: { code: 429, message: 'Quota exceeded',
+      details: [{ violations: [{ quotaId: 'GenerateRequestsPerDayPerProjectPerModel-FreeTier' }] }] } }), { status: 429 });
+    return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: '{"translation":"ok"}' }] } }] }));
+  };
+  _resetModels();
+  const fb1 = await direct('k', { system: 's', user: 'u' });
+  const fb2 = await direct('k', { system: 's', user: 'u' });
+  window.fetch = realFetchU;
+  _resetModels();
+  ok(fb1.model === 'gemini-2.5-flash-lite' && fb1.result.translation === 'ok' && fb2.model === 'gemini-2.5-flash-lite'
+    && asked.join() === 'gemini-2.5-flash,gemini-2.5-flash-lite,gemini-2.5-flash-lite',
+    'when Flash’s daily free limit is used up, Flash-Lite answers, and Flash is skipped until it resets: ' + asked);
   await db.setSetting('secret:test', 'sk-123');
   ok(!(await db.exportAll()).data.kv.some((r) => r.key.startsWith('secret:')), 'backups never contain API keys');
   await db.del('kv', 'secret:test');

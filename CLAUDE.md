@@ -77,7 +77,7 @@ Local audio/video blobs live in the `media` store, keyed by `lessonId`, and are 
 
 **One AI for translations and explanations** (`js/ai.js`, Google Gemini free tier). Users found the old mix of sentence translators, bilingual dictionaries and "meaning here" guesses noisy and often wrong, and asked to see only the meaning that fits the sentence. So there is no dictionary list of other senses anywhere.
 - `geminiJson({system, user, schema})` uses the user's own key (kv `secret:gemini`, never synced or backed up) directly against `generativelanguage.googleapis.com`. Without one, a signed-in user goes through the sync server's Edge Function `supabase/functions/ai/index.ts` (the owner's `GEMINI_API_KEY` secret; it rejects the anon role). With neither, it throws `no-provider`.
-- `settings.geminiModel` ('' = the newest stable `gemini-*-flash` from the live model list). `responseSchema` uses Gemini's uppercase OpenAPI types.
+- `settings.geminiModel` ('' = the newest stable `gemini-*-flash` from the live model list). Each model has its own free quota, so on a 429 (or 404) `direct()` and the `ai` function move to the next stable Flash/Flash-Lite model (up to 4) and skip the spent one for a minute, or until midnight Pacific when the quota id says `PerDay`. `responseSchema` uses Gemini's uppercase OpenAPI types.
 - `translateSentence()` (the reader's line-translate button) is a translation-only prompt cached under `s|from|to|hash32`. A word answer also writes its sentence translation there, so both always agree.
 - The panel gets the exact sentence from `sentenceAt(text, charOffset)`, using the tapped span's `data-o`.
 - Tests stub every AI call with `window.__lingoGemini(req) → {result, model}`, plus `__lingoASR`.

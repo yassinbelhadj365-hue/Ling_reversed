@@ -9,6 +9,38 @@
 
 const DEFAULT_MODEL = Deno.env.get('GEMINI_MODEL') || 'gemini-2.5-flash';
 const MAX_CHARS = 60000; // about the 30k-character transcript excerpt plus the prompt
+const API = 'https://generativelanguage.googleapis.com/v1beta';
+
+// Each model has its own free limit: when one is used up, the next stable Flash model answers.
+// Kept while this function instance stays warm (same rule as js/ai.js).
+const spent = new Map<string, number>(); // model -> when to try it again
+let flashModels: string[] | null = null;
+const version = (id: string) => {
+  const m = /^gemini-(\d+)(?:\.(\d+))?-flash(-lite)?$/.exec(id);
+  return m ? Number(m[1]) * 100 + Number(m[2] || 0) - (m[3] ? 0.5 : 0) : null;
+};
+async function modelsToTry(key: string, first: string) {
+  if (!flashModels) {
+    try {
+      const res = await fetch(`${API}/models?pageSize=200`, { headers: { 'x-goog-api-key': key } });
+      if (!res.ok) throw new Error(String(res.status));
+      const { models = [] } = await res.json();
+      flashModels = (models as { name: string; supportedGenerationMethods?: string[] }[])
+        .filter((m) => (m.supportedGenerationMethods || []).includes('generateContent'))
+        .map((m) => m.name.replace(/^models\//, ''))
+        .filter((id) => version(id) !== null)
+        .sort((a, b) => version(b)! - version(a)!); // newest first, Lite after its full model
+    } catch { /* just the first */ }
+  }
+  const open = [first, ...(flashModels || []).filter((id) => id !== first)].filter((id) => !((spent.get(id) || 0) > Date.now()));
+  return (open.length ? open : [first]).slice(0, 4);
+}
+function nextDailyReset() {
+  const d = new Date();
+  d.setUTCHours(8, 0, 0, 0); // midnight Pacific (standard time)
+  if (+d <= Date.now()) d.setUTCDate(d.getUTCDate() + 1);
+  return +d;
+}
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -54,10 +86,10 @@ Deno.serve(async (req) => {
   }];
 
   // Quick lookups get only a little "thinking" (same rule as js/ai.js thinkingLight).
-  const thinking = !body.fast ? null
-    : /^gemini-2\.5-/.test(model) ? (/pro/.test(model) ? null : { thinkingBudget: 512 })
-    : /^gemini-[3-9]/.test(model) ? { thinkingLevel: 'low' } : null;
-  const send = (withThinking: boolean) => fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+  const thinkingFor = (m: string) => !body.fast ? null
+    : /^gemini-2\.5-/.test(m) ? (/pro/.test(m) ? null : { thinkingBudget: 512 })
+    : /^gemini-[3-9]/.test(m) ? { thinkingLevel: 'low' } : null;
+  const send = (m: string, withThinking: boolean) => fetch(`${API}/models/${m}:generateContent`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
     body: JSON.stringify({
@@ -67,21 +99,31 @@ Deno.serve(async (req) => {
         temperature: 0, responseMimeType: 'application/json',
         ...(v ? { mediaResolution: 'MEDIA_RESOLUTION_LOW' } : {}),
         ...(body.schema ? { responseSchema: body.schema } : {}),
-        ...(withThinking && thinking ? { thinkingConfig: thinking } : {}),
+        ...(withThinking && thinkingFor(m) ? { thinkingConfig: thinkingFor(m) } : {}),
       },
     }),
   });
 
   try {
-    let res = await send(true);
-    let data = await res.json().catch(() => ({}));
-    if (res.status === 400 && thinking && /think/i.test(data?.error?.message || '')) {
-      res = await send(false);
-      data = await res.json().catch(() => ({}));
+    let failed: { status: number; error: string } | null = null;
+    for (const m of await modelsToTry(key, model)) {
+      let res = await send(m, true);
+      let data = await res.json().catch(() => ({}));
+      if (res.status === 400 && thinkingFor(m) && /think/i.test(data?.error?.message || '')) {
+        res = await send(m, false);
+        data = await res.json().catch(() => ({}));
+      }
+      // This model's free limit is used up: the next one answers (same rule as js/ai.js).
+      if (res.status === 429 || res.status === 404) {
+        spent.set(m, res.status === 404 || /PerDay/i.test(JSON.stringify(data?.error?.details || [])) ? nextDailyReset() : Date.now() + 60_000);
+        failed ||= { status: res.status, error: data?.error?.message || res.statusText };
+        continue;
+      }
+      if (!res.ok) return reply({ ok: false, status: res.status, error: data?.error?.message || res.statusText });
+      const text = (data?.candidates?.[0]?.content?.parts || []).map((p: { text?: string }) => p.text || '').join('');
+      return reply({ ok: true, text, model: m, ...(v ? { video: true } : {}) });
     }
-    if (!res.ok) return reply({ ok: false, status: res.status, error: data?.error?.message || res.statusText });
-    const text = (data?.candidates?.[0]?.content?.parts || []).map((p: { text?: string }) => p.text || '').join('');
-    return reply({ ok: true, text, model, ...(v ? { video: true } : {}) });
+    return reply({ ok: false, ...failed });
   } catch {
     return reply({ ok: false, error: 'Couldn’t reach Google’s AI from the server.' });
   }

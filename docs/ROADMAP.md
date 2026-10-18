@@ -34,6 +34,10 @@ this file records where things stand, what the owner decided, and what's next.
   timed, punctuated transcript; the lesson plays the video as usual. Also used by "Transcribe
   the audio with AI" without a local server. Covered by smoke tests with a stubbed Gemini;
   **not yet tried with a real key** (quality, timestamp accuracy, speed, free-tier limits).
+- **The AI runs out less** (2026-10-18): each Gemini model has its own free limit, so when one
+  is used up the next free Flash/Flash-Lite model answers (own key and shared function). The
+  owner asked for this after their key ran out; other providers (Groq, Mistral) and rotating
+  several keys were offered and not chosen for now.
 - **Phone**: Capacitor app in `mobile/`, built by GitHub Actions (APK + unsigned IPA,
   docs/MOBILE.md); YouTube captions fetched by the native app (js/youtube.js); file picker
   that iPhones don't grey out; iPhone Shortcut route (docs/IPHONE_SHORTCUT.md). The owner
