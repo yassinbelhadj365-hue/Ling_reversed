@@ -123,7 +123,8 @@ async function init() {
   if (!location.hash) location.hash = '#/library';
   else route();
 
-  if ('serviceWorker' in navigator && location.protocol !== 'file:') {
+  // The phone app ships its files inside the app, so it needs no offline cache.
+  if ('serviceWorker' in navigator && location.protocol !== 'file:' && !window.Capacitor?.isNativePlatform?.()) {
     navigator.serviceWorker.register('sw.js').catch(() => { /* offline mode unavailable */ });
   }
   document.body.dataset.ready = '1';

@@ -732,6 +732,27 @@ try {
   cloudFn = () => ({ ok: false, error: 'blocked' });
   ok(await relay.fetchTranscript('dQw4w9WgXcQ', 'es') === null && relay.cloudOutcome === 'blocked', 'when YouTube refuses the cloud helper, it falls back to asking the computer');
   cloudFn = null;
+  // in the phone app (Capacitor), the phone downloads the captions itself
+  const fetchBefore = window.fetch;
+  const ytSeen = [];
+  window.Capacitor = { isNativePlatform: () => true };
+  window.fetch = async (url, opts) => {
+    const u = String(url);
+    if (u.startsWith('https://www.youtube.com/youtubei/v1/player')) {
+      ytSeen.push(opts.headers['User-Agent']);
+      return new Response(JSON.stringify({ playabilityStatus: { status: 'OK' }, videoDetails: { title: 'En el teléfono' },
+        captions: { playerCaptionsTracklistRenderer: { captionTracks: [
+          { languageCode: 'en', kind: 'asr', name: { simpleText: 'English (auto)' }, baseUrl: 'https://yt.test/en?x=1' },
+          { languageCode: 'es', name: { simpleText: 'Español' }, baseUrl: 'https://yt.test/es?x=1&fmt=srv3' }] } } }));
+    }
+    if (u.startsWith('https://yt.test/es')) return new Response(u.endsWith('&fmt=vtt') ? AUTO_VTT : 'wrong format');
+    return fetchBefore(url, opts);
+  };
+  const viaPhone = await relay.fetchTranscript('dQw4w9WgXcQ', 'es');
+  delete window.Capacitor;
+  window.fetch = fetchBefore;
+  ok(viaPhone?.ok && viaPhone.via === 'phone' && viaPhone.title === 'En el teléfono' && viaPhone.track.lang === 'es' && viaPhone.vtt === AUTO_VTT
+    && /android/i.test(ytSeen[0]), 'in the phone app, the phone downloads the Spanish captions itself (as the YouTube app)');
   const job = await relay.requestImport({ kind: 'transcript', videoId: 'dQw4w9WgXcQ', url: 'https://youtu.be/dQw4w9WgXcQ', title: '', track: '', merge: true });
   await cloud.syncNow();
   ok(/Waiting for your computer/.test(relay.jobStatusText(job)), 'the request waits for the computer');

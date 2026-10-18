@@ -10,6 +10,7 @@ import { newLessonId, deviceId } from './db.js';
 import { state, lang, langName, addLessonToPool, toast, plural } from './state.js';
 import { parseAny, mergeCues, countWords } from './text.js';
 import { activeAccount, isSignedIn, cloudConfig, syncNow, onStatus, callFunction } from './cloud.js';
+import { isNativeApp, phoneTranscript } from './youtube.js';
 import { capabilities, fetchYouTubeAudio, decodeAudio, transcribe, toVtt } from './asr.js';
 
 const PREFIX = 'job:';
@@ -61,9 +62,14 @@ export const serverCaps = () => (caps ||= capabilities());
 export let cloudOutcome = '';
 
 // YouTube captions -> {ok, title, track, tracks, vtt, via} | {ok:false, error} | null (nothing could fetch them).
-// First serve.ps1 on this device, then the cloud helper (Supabase Edge Function "transcript").
+// In the phone app, the phone itself (youtube.js); then serve.ps1 on this device, then the
+// cloud helper (Supabase Edge Function "transcript").
 export async function fetchTranscript(videoId, language, track = '') {
   const withTrack = track !== '' && track != null;
+  if (isNativeApp()) {
+    const r = await phoneTranscript(videoId, language, track);
+    if (r.ok || !['blocked', 'network'].includes(r.error)) return { ...r, via: 'phone' };
+  }
   try {
     const res = await fetch(`api/transcript?v=${videoId}&lang=${language}${withTrack ? `&track=${track}` : ''}`);
     if (res.headers.get('content-type')?.includes('json')) return { ...(await res.json()), via: 'local' };

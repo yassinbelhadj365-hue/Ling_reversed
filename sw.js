@@ -3,7 +3,7 @@
 const CACHE = 'lingo-reader-v5';
 const SHELL = [
   './', './index.html', './styles.css', './manifest.webmanifest', './icon.svg',
-  './js/app.js', './js/db.js', './js/text.js', './js/srs.js', './js/state.js', './js/panel.js', './js/knowledge.js', './js/sync.js', './js/player.js', './js/ai.js', './js/assist.js', './js/asr.js', './js/asr-worker.js', './js/check.js', './js/explain.js', './js/cloud.js', './js/config.js', './js/relay.js', './js/views/account.js',
+  './js/app.js', './js/db.js', './js/text.js', './js/srs.js', './js/state.js', './js/panel.js', './js/knowledge.js', './js/sync.js', './js/player.js', './js/ai.js', './js/assist.js', './js/asr.js', './js/asr-worker.js', './js/check.js', './js/explain.js', './js/cloud.js', './js/config.js', './js/relay.js', './js/youtube.js', './js/views/account.js',
   './js/views/library.js', './js/views/import.js', './js/views/reader.js', './js/views/review.js',
   './js/views/vocab.js', './js/views/stats.js', './js/views/settings.js',
 ];

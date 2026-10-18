@@ -4,6 +4,8 @@ import { fetchYouTubeAudio, decodeAudio, transcribe, toVtt, progressText, AUDIO_
 import { prepare, createLesson, fetchTranscript as serverTranscript, serverCaps, canRelay, requestImport, cloudOutcome } from '../relay.js';
 import { NEW } from '../srs.js';
 
+const TEXT_FILE = /\.(txt|srt|vtt|md|html?)$/i;
+
 // A link or text shared into the app (Android: Share → Lingo Reader), stored by app.js.
 function takeShared() {
   try {
@@ -38,8 +40,8 @@ export async function renderImport(view) {
       </div>
       <div class="field">
         <label for="files">…or upload files</label>
-        <input id="files" type="file" multiple accept=".txt,.srt,.vtt,.md,.html,.htm,text/plain,text/vtt">
-        <span class="small muted">.srt, .vtt, .txt, .md or .html. Each file becomes its own lesson.</span>
+        <input id="files" type="file" multiple accept=".txt,.srt,.vtt,.md,.html,.htm,text/*,application/x-subrip,*/*">
+        <span class="small muted">.srt, .vtt, .txt, .md or .html, also from your phone’s Files. Each file becomes its own lesson.</span>
       </div>
       <div class="field">
         <label for="media">Audio or video file (optional)</label>
@@ -57,6 +59,7 @@ export async function renderImport(view) {
       <p class="small">Only a <b>computer</b> running <b>Start Lingo Reader</b> can download from YouTube (YouTube refuses
         requests from other websites, and phones can’t run the helper). There are a few ways to import on your phone:</p>
       <ol class="small">
+        <li><b>The Lingo Reader phone app</b> (docs/MOBILE.md) downloads transcripts itself: paste a link and it just works.</li>
         <li><b>Cloud helper (no computer needed):</b> if you added the free <i>transcript</i> function to your sync
           server (docs/SYNC_SETUP.md), pasting a link works directly. YouTube sometimes refuses it; then the next option kicks in.</li>
         <li><b>Let your computer do it (easiest).</b> Log in to the same account on your phone and computer (top right,
@@ -234,13 +237,17 @@ export async function renderImport(view) {
     const items = [];
     const text = $('#text').value;
     if (text.trim()) items.push({ title: $('#title').value.trim(), raw: text, filename: '' });
+    const skipped = [];
     for (const f of $('#files').files) {
+      // The picker accepts any file (iPhones grey out .srt/.vtt otherwise), so check here.
+      if (!TEXT_FILE.test(f.name) && !/^text\//.test(f.type)) { skipped.push(f.name); continue; }
       let raw = await f.text();
       if (/\.html?$/i.test(f.name)) raw = htmlToText(raw);
       const title = items.length === 0 && $('#title').value.trim() ? $('#title').value.trim() : f.name.replace(/\.[^.]+$/, '');
       items.push({ title, raw, filename: f.name });
     }
-    if (!items.length) return toast('Paste a YouTube link, some text, or choose a file first.');
+    if (skipped.length) toast(`Skipped ${skipped.join(', ')}: only subtitle or text files (.srt, .vtt, .txt, .md, .html) become lessons.`, 6000);
+    if (!items.length) return skipped.length || toast('Paste a YouTube link, some text, or choose a file first.');
 
     btn.disabled = true;
     btn.textContent = 'Importing…';
