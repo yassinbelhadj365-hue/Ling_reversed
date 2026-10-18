@@ -7,6 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 Lingo Reader: a clean-room, LingQ-style language-learning PWA (import content → read with words colour-coded by status → save LingQs → spaced-repetition review → track a known-word pool). It reimplements LingQ's *method* only — never copy LingQ code, assets, content, or call its private API.
 
 Plain HTML/CSS/vanilla ES modules. **No build step, no package.json, no dependencies** (transformers.js for Whisper is loaded from jsDelivr inside a worker). Data lives in the browser's IndexedDB, optionally synced to the user's own free Supabase project.
+- **Phone app:** `mobile/` wraps the same files with Capacitor (its own package.json, used only in CI). `.github/workflows/mobile.yml` builds a signed APK and an unsigned IPA (sideloaded with Sideloadly); `android/` and `ios/` are generated there by `cap add`, not committed. Inside the app `window.Capacitor.isNativePlatform()` is true: `js/youtube.js` fetches captions through `Capacitor.Plugins.CapacitorHttp` (only those requests; the global fetch patch is off), and no service worker is registered. See docs/MOBILE.md.
 - **Free services only:** the user won't pay for APIs. Never add paid services or models; their ChatGPT subscription is used only by opening chatgpt.com.
 
 ## Workflow

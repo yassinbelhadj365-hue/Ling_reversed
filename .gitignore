@@ -7,3 +7,11 @@ Desktop.ini
 .DS_Store
 .vscode/
 *.log
+
+# Phone app build output (made in GitHub Actions, see docs/MOBILE.md)
+mobile/www/
+mobile/node_modules/
+mobile/android/
+mobile/ios/
+mobile/assets/
+mobile/package-lock.json

@@ -108,8 +108,10 @@ export async function renderSettings(view) {
 
     <div class="card">
       <h2 style="margin-top:0">Install on your phone</h2>
-      <p class="small">Open this app in your phone’s browser, then use <b>Share → Add to Home Screen</b> (iPhone, Safari) or
-        <b>⋮ → Install app</b> (Android, Chrome). It then opens full-screen and works offline, except for dictionary lookups.</p>
+      <p class="small"><b>The phone app</b> (Android and iPhone, free) can download YouTube transcripts by itself.
+        See <i>docs/MOBILE.md</i> in the project for how to build and install it.</p>
+      <p class="small">Or open this website in your phone’s browser and use <b>Share → Add to Home Screen</b> (iPhone, Safari) or
+        <b>⋮ → Install app</b> (Android, Chrome). It then opens full-screen and works offline, except for AI lookups.</p>
     </div>`;
 
   const $ = (sel) => view.querySelector(sel);
