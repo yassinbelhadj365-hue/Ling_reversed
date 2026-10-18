@@ -436,16 +436,37 @@ export async function renderReader(view, id) {
     pausedForLookup = false;
   }
 
+  // Segment i joined with its neighbours when it has no sentence punctuation (auto-captions),
+  // each part keeping its caption-line marks. shift = where segment i starts in the result.
+  function withNeighbours(i) {
+    const seg = lesson.segments[i];
+    if (/[.!?…。？！]/.test(seg.text)) return { seg, shift: 0 };
+    let text = '', shift = 0;
+    const marks = [];
+    for (const k of [i - 1, i, i + 1]) {
+      const s = lesson.segments[k];
+      if (!s || (k !== i && /[.!?…。？！]/.test(s.text))) continue;
+      if (text) text += ' ';
+      if (k === i) shift = text.length;
+      marks.push(...(s.marks || [[0, s.start ?? null]]).map(([o, t]) => [text.length + o, t]));
+      text += s.text;
+    }
+    return { seg: { text, marks }, shift };
+  }
+
   function open(term, p, spans) {
     reader.querySelectorAll('.w.active').forEach((n) => n.classList.remove('active'));
     spans.forEach((s) => s.classList.add('active'));
-    // The short context of the occurrence you tapped (its sentence or caption line), with the word's position in it.
+    // The context of the occurrence you tapped (its sentence, or a few caption lines around it), with the word's position in it.
     const i = Number(p.dataset.i);
     const seg = lesson.segments[i];
     const from = Number(spans[0].dataset.o);
     const last = spans[spans.length - 1];
     const to = Number(last.dataset.o) + last.textContent.length;
-    let { sentence, start } = contextAt(seg, from);
+    // Auto-captions have short, unpunctuated chunks: look into the neighbouring ones too.
+    const wide = withNeighbours(i);
+    let { sentence, start } = contextAt(wide.seg, from + wide.shift);
+    start -= wide.shift; // back to this segment's offsets (negative when it starts in the previous one)
     // A phrase that runs past the short context: use its whole sentence instead.
     if (to - start > sentence.length) ({ sentence, start } = sentenceAt(seg.text, from));
     const mark = from - start >= 0 && to - start <= sentence.length ? [from - start, to - start] : null;

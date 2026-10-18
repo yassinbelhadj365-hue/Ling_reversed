@@ -144,7 +144,12 @@ try {
     'je tartine bien la confiture', 'par-dessus le beurre en une couche épaisse'].map((text, k) => ({ text, start: k * 2 }));
   const mergedFr = mergeCues(cues, 220, 1000)[0];
   const cc = contextAt(mergedFr, at(mergedFr.text, 'confiture'));
-  ok(cc.sentence === 'je tartine bien la confiture par-dessus le beurre en une couche épaisse', 'contextAt: in merged auto-captions, the caption line of the word (plus a very short next one): ' + cc.sentence);
+  ok(cc.sentence === 'dans le chocolat et je vais prendre de la pâte à tartiner au chocolat je tartine bien la confiture par-dessus le beurre en une couche épaisse',
+    'contextAt: in auto-captions, whole caption lines around the word until about 20 words: ' + cc.sentence);
+  const longCues = Array.from({ length: 12 }, (_, k) => ({ text: `uno dos tres cuatro cinco seis siete ocho nueve diez${k}`, start: k * 3 }));
+  const lm = mergeCues(longCues, 1e4, 1e4)[0];
+  const lc = contextAt(lm, lm.text.indexOf('diez6'));
+  ok(lc.sentence.split(' ').length >= 20 && lc.sentence.split(' ').length <= 40 && lc.sentence.includes('diez6'), 'contextAt: never more than about 40 words: ' + lc.sentence.split(' ').length);
   ok(contextAt({ text: 'Hola. Compré la casa ayer. ¿Y tú?' }, 10).sentence === 'Compré la casa ayer.', 'contextAt: punctuated text → its sentence');
   ok(mergeCues(cues).length >= 3 && mergeCues(cues).every((c) => c.text.length < 100), 'mergeCues: unpunctuated captions stay short lines');
 

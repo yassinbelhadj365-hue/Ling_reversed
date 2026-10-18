@@ -244,36 +244,47 @@ export function sentenceAt(text, offset) {
   return { sentence: text.trim(), start: lead };
 }
 
-// The short piece of text a lookup is about, for the panel and the AI.
-// - Text with punctuation: the sentence (sentenceAt), when it's short enough.
-// - Auto-captions (no punctuation): the original caption line the word was in, found
-//   through the merged segment's `marks` (one per caption cue), plus the next line when
-//   it's very short.
+// The piece of text a lookup is about, for the panel and the AI: enough to understand
+// the word (about minWords–maxWords words), but not a whole paragraph.
+// - Text with punctuation: the sentence (sentenceAt), when it isn't too long.
+// - Auto-captions (no punctuation): whole caption lines around the word, found through
+//   `marks` (one per caption cue), added one at a time until there are about minWords.
 // - Otherwise: about `window` words on each side of the word.
 // Never crosses caption tags like [Musique] or ♪.
 // seg: {text, marks?}; offset: the tapped word's character offset in seg.text.
 // -> {sentence, start}: start = index of the context's first character in seg.text.
 const TAG = /\[[^\]\n]{0,40}\]|\([A-ZÀ-Ý][^)\n]{0,30}\)|[♪♫]+/g;
-export function contextAt(seg, offset, { maxWords = 30, window = 12 } = {}) {
+const SENTENCE_END = /[.!?…。？！]/;
+export function contextAt(seg, offset, { minWords = 20, maxWords = 40, window = 15 } = {}) {
   const text = seg.text;
   const words = (s) => s.split(/\s+/).filter(Boolean).length;
   let a, b;
   const s = sentenceAt(text, offset);
-  if (words(s.sentence) <= maxWords) {
+  if (SENTENCE_END.test(text) && words(s.sentence) <= maxWords) {
     a = s.start; b = s.start + s.sentence.length;
   } else if (seg.marks?.length > 1) {
-    const starts = seg.marks.map(([o]) => o).sort((x, y) => x - y);
-    let k = starts.findLastIndex((o) => o <= offset);
-    if (k < 0) k = 0;
-    a = starts[k];
-    b = starts[k + 1] ?? text.length;
-    if (words(text.slice(a, b)) < 6 && k + 2 <= starts.length) b = starts[k + 2] ?? text.length;
+    const starts = [...new Set(seg.marks.map(([o]) => o))].sort((x, y) => x - y);
+    let lo = Math.max(0, starts.findLastIndex((o) => o <= offset)), hi = lo + 1;
+    const span = (l, h) => text.slice(starts[l], starts[h] ?? text.length);
+    // Add the next line, then the previous one, and so on, while it stays short enough.
+    for (let grew = true; grew && words(span(lo, hi)) < minWords;) {
+      grew = false;
+      for (const [l, h] of [[lo, hi + 1], [lo - 1, hi]]) {
+        if (words(span(lo, hi)) >= minWords || l < 0 || h > starts.length || words(span(l, h)) > maxWords) continue;
+        [lo, hi] = [l, h];
+        grew = true;
+      }
+    }
+    a = starts[lo];
+    b = starts[hi] ?? text.length;
+  } else if (words(s.sentence) <= maxWords) {
+    a = s.start; b = s.start + s.sentence.length;
   } else {
     const before = text.slice(0, offset).split(/(\s+)/);
     let n = 0, i = before.length;
     while (i > 0 && n < window) { i--; if (before[i].trim()) n++; }
     a = before.slice(0, i).join('').length;
-    const after = /^(\s*\S+){0,13}/.exec(text.slice(offset))[0];
+    const after = new RegExp(`^(\\s*\\S+){0,${window + 1}}`).exec(text.slice(offset))[0];
     b = offset + after.length;
   }
   // Cut at caption tags, keeping the side the word is on.
