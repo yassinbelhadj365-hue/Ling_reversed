@@ -329,6 +329,10 @@ export function dayKey(d = new Date()) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
+// Called after known words increase (progress.js listens, for milestones).
+const knownListeners = [];
+export const onKnownChange = (fn) => knownListeners.push(fn);
+
 export async function bumpActivity(delta) {
   if (!delta || !Object.keys(delta).length) return;
   const date = dayKey();
@@ -339,6 +343,7 @@ export async function bumpActivity(delta) {
     for (const [k, v] of Object.entries(delta)) row[k] = (row[k] || 0) + v;
     return row;
   });
+  if (delta.known > 0) knownListeners.forEach((fn) => fn());
 }
 
 // ---------- study time and the daily goal ----------

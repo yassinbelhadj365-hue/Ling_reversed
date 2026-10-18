@@ -16,6 +16,7 @@ import { compareLine, heardBetween } from '../js/check.js';
 import { excerptAround, buildPrompt } from '../js/explain.js';
 import { parseShortcut, pickShortcutTrack } from '../js/youtube.js';
 import { lessonLevel } from '../js/views/library.js';
+import { milestoneFor, weekStart, recapOf, checkMilestone } from '../js/progress.js';
 
 // A scriptable stand-in for the YouTube/media player (js/player.js test hook).
 function makeFakePlayer() {
@@ -165,6 +166,31 @@ try {
   const sk3 = streakOf(actDays([18, 16, 14, 13]), NOW);
   ok(sk3.days === 2 && sk3.saved === 1, 'streak: only one saved day per week ' + JSON.stringify(sk3));
   ok(streakOf(new Map(), NOW).days === 0, 'streak: nothing yet');
+
+  // ---- unit: milestones and the weekly recap (progress.js) ----
+  ok(milestoneFor(99) === 0 && milestoneFor(100) === 100 && milestoneFor(999) === 500 && milestoneFor(12000) === 10000, 'milestoneFor');
+  const mon = weekStart(new Date(2026, 9, 18, 15)); // Sunday 18 Oct 2026 → Monday 12 Oct
+  ok(mon.getDate() === 12 && mon.getDay() === 1 && mon.getHours() === 0, 'weekStart: Monday 00:00 of the week');
+  const pageState = await import('../js/state.js');
+  const savedVocab = pageState.state.vocab;
+  const mk = (term, status, knownAt) => [term, { term, status, knownAt, isPhrase: term.includes(' ') }];
+  pageState.state.vocab = new Map([mk('uno', 5, +new Date(2026, 9, 13)), mk('dos', 5, +new Date(2026, 9, 5)), mk('tres', 2, 0), mk('a b', 5, +new Date(2026, 9, 14))]);
+  const nextMon = new Date(mon); nextMon.setDate(mon.getDate() + 7);
+  const rc = recapOf(new Map([['2026-10-12', { date: '2026-10-12', secs: 600, lingqs: 2 }], ['2026-10-14', { date: '2026-10-14', secs: 300, lingqs: 0, reviews: 3 }], ['2026-10-05', { date: '2026-10-05', secs: 900 }]]), mon, nextMon);
+  ok(rc.learned.join() === 'uno' && rc.mins === 15 && rc.days === 2 && rc.lingqs === 2, 'recapOf: words learned that week (no phrases), minutes, active days, LingQs ' + JSON.stringify(rc));
+  // a milestone: the first check only records where you are; crossing the next one celebrates
+  await db.del('kv', 'milestone|es');
+  pageState.state.vocab = new Map(Array.from({ length: 99 }, (_, k) => mk(`w${k}`, 5, 1)));
+  await checkMilestone();
+  ok(!document.querySelector('.celebrate') && (await db.getSetting('milestone|es', null)) === 0, 'milestones: the first check is silent');
+  pageState.state.vocab.set('w99', { term: 'w99', status: 5 });
+  await checkMilestone();
+  ok(/100 Spanish words known/.test(document.querySelector('.celebrate h2')?.textContent || ''), 'milestones: reaching 100 known words celebrates');
+  document.querySelector('.celebrate [data-close]').click();
+  await checkMilestone();
+  ok(!document.querySelector('.celebrate'), 'milestones: each one is celebrated once');
+  await db.del('kv', 'milestone|es');
+  pageState.state.vocab = savedVocab;
 
   // ---- unit: lesson difficulty (library.js lessonLevel) ----
   const st = { el: 5, la: 5, gato: 0, ana: -1, come: 2 };

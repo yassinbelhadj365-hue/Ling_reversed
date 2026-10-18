@@ -4,6 +4,7 @@ import { NEW, KNOWN, IGNORED, isLearning } from '../srs.js';
 import { myJobs, jobStatusText, cancelJob, retryJob, createLesson } from '../relay.js';
 import { hasProvider } from '../ai.js';
 import { SAMPLES } from '../samples.js';
+import { lastWeekCard, closeLastWeekCard } from '../progress.js';
 
 const KIND = { transcript: 'Transcript', text: 'Text' };
 
@@ -130,11 +131,17 @@ export async function renderLibrary(view) {
       </a>`;
   }).join('');
 
+  const recap = await lastWeekCard();
   view.innerHTML = `
     <div class="row spread"><h1>${esc(langName(lang()))} library</h1><a class="btn primary small" href="#/import">+ Import</a></div>
     ${jobs}
+    ${recap}
     <div class="field"><input type="search" id="q" placeholder="Search lessons…" aria-label="Search lessons"></div>
     <div class="lesson-list" id="list">${cards}</div>`;
+  view.querySelector('[data-act="close-recap"]')?.addEventListener('click', async (e) => {
+    e.target.closest('.recap').remove();
+    await closeLastWeekCard();
+  });
   wireJobs(view, rerender);
 
   view.querySelector('#q').addEventListener('input', (e) => {

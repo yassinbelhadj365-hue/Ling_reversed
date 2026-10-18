@@ -384,3 +384,23 @@ details.more-options { margin-top: 14px; border-top: 1px solid var(--border); pa
 details.more-options > summary { cursor: pointer; color: var(--text-2); font-size: .9rem; padding: 4px 0; }
 details.more-options[open] > summary { margin-bottom: 8px; }
 details.more-options #help { margin-top: 10px; }
+
+/* ---------- weekly recap and milestones ---------- */
+.recap h3 { margin: 0; }
+.recap-nums { display: flex; flex-wrap: wrap; gap: 6px 18px; margin: 8px 0 4px; }
+.recap-nums b { font-size: 1.25rem; font-variant-numeric: tabular-nums; }
+.recap-words { color: var(--text-2); margin: 6px 0 0; overflow-wrap: anywhere; }
+.celebrate {
+  position: fixed; inset: 0; z-index: 100; display: grid; place-items: center; padding: 16px;
+  background: color-mix(in srgb, var(--bg) 70%, transparent);
+}
+.celebrate-card { position: relative; max-width: 360px; text-align: center; box-shadow: 0 10px 40px rgb(0 0 0 / .25); }
+.celebrate-card h2 { margin: 0 0 6px; }
+.celebrate-emoji { font-size: 2.6rem; margin: 0; }
+.confetti { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+.confetti i {
+  position: absolute; top: -12px; width: 8px; height: 14px; border-radius: 2px; background: var(--c);
+  animation: confetti-fall 1.8s ease-in forwards;
+}
+@keyframes confetti-fall { to { transform: translateY(110vh) rotate(540deg); opacity: .2; } }
+@media (prefers-reduced-motion: reduce) { .confetti { display: none; } }

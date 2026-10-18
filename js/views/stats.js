@@ -2,6 +2,7 @@ import * as db from '../db.js';
 import { state, lang, langName, dayKey, esc, plural, activityByDay, streakOf } from '../state.js';
 import { isLearning } from '../srs.js';
 import { poolStats } from './vocab.js';
+import { thisWeekCard, knownCount, MILESTONES } from '../progress.js';
 
 const METRICS = [
   ['mins', 'Minutes studied (reading, listening, review)'],
@@ -45,6 +46,9 @@ export async function renderStats(view) {
   const todayMins = Math.floor(today.secs / 60);
   const goalPct = Math.min(100, Math.round((today.secs / 60 / goal) * 100));
   let metric = 'mins';
+  const week = await thisWeekCard();
+  const known = knownCount();
+  const nextMilestone = MILESTONES.find((m) => m > known);
 
   view.innerHTML = `
     <h1>${esc(langName(lang()))} stats</h1>
@@ -53,8 +57,9 @@ export async function renderStats(view) {
       <div class="goal" role="img" aria-label="${goalPct}% of daily goal"><div style="width:${goalPct}%"></div></div>
       <p class="small muted" style="margin:8px 0 0">${goalPct >= 100 ? 'Goal reached. Anything more is a bonus. ' : todayMins ? '' : 'Reading, listening and reviewing all count. '}Today: ${plural(Math.max(0, today.known), 'word')} learned · ${plural(today.lingqs, 'LingQ')} · ${plural(today.reviews, 'review')} · ${plural(today.read, 'word')} read</p>
     </div>
+    ${week}
     <div class="tiles">
-      <div class="tile"><div class="v">${pool.known.toLocaleString()}</div><div class="l">Known words</div></div>
+      <div class="tile"><div class="v">${pool.known.toLocaleString()}</div><div class="l">Known words${nextMilestone ? ` · next milestone ${nextMilestone.toLocaleString()}` : ''}</div></div>
       <div class="tile"><div class="v">${pool.learning.toLocaleString()}</div><div class="l">LingQs</div></div>
       <div class="tile"><div class="v">${Math.round(pool.coverage * 100)}%</div><div class="l">Coverage of your content</div></div>
       <div class="tile"><div class="v">${due.toLocaleString()}</div><div class="l">Reviews due</div></div>
