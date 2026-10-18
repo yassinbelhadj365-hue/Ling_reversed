@@ -42,6 +42,15 @@ function paginate(segments, pageSize, lang) {
   return pages.length ? pages : [[]];
 }
 
+// A paragraph's sentences with their character offsets: [{text, o}].
+export function sentencesOf(text) {
+  const out = [];
+  const re = /[^.!?…]+[.!?…]*["»”’)]*\s*/g;
+  let m;
+  while ((m = re.exec(text))) if (m[0].trim()) out.push({ text: m[0], o: m.index });
+  return out.length ? out : [{ text, o: 0 }];
+}
+
 function statusClass(term) {
   const s = statusOf(term);
   return s === NEW ? 'st-0' : isLearning(s) ? `st-${s}` : '';
@@ -119,6 +128,7 @@ export async function renderReader(view, id) {
       <h1 dir="auto">${esc(lesson.title)}</h1>
       <div class="row">
         <a class="badge session-chip" id="session-chip" href="#/vocab/auto" title="Automatic changes this session — tap to review or revert" hidden></a>
+        <button class="btn small" id="sent-btn" title="One sentence at a time, large, with its audio and translation">🔍 Sentences</button>
         ${listen ? '' : '<button class="btn small" id="tts" title="Read this page aloud">🔊 Listen</button>'}
         <button class="btn small danger" id="del">Delete</button>
       </div>
@@ -131,6 +141,16 @@ export async function renderReader(view, id) {
       <span><i style="background:var(--surface);border-bottom:2px solid var(--w-phrase)"></i>Phrase</span>
     </div>
     <article class="reader" id="reader" lang="${esc(lesson.lang)}"></article>
+    <div class="card sent-bar" id="sent-bar" hidden>
+      <p class="sent-tr" id="sent-tr" dir="auto" hidden></p>
+      <div class="row spread">
+        <button class="btn" data-sent="prev" aria-label="Previous sentence">←</button>
+        <button class="btn" data-sent="play">▶ Play</button>
+        <button class="btn" data-sent="tr">Translate</button>
+        <span class="small muted" id="sent-n"></span>
+        <button class="btn primary" data-sent="next">Next →</button>
+      </div>
+    </div>
     ${footer}
     <p class="muted small">${S.autoStatus
       ? 'Tap words you don’t know. Words you read past without tapping become known; words you tapped level up as you meet them again.'
@@ -198,6 +218,8 @@ export async function renderReader(view, id) {
       }
     }
     if (listen && S.wordProgress && activePos >= 0) markSpoken(t);
+    // Sentence mode plays one line, then waits.
+    if (sentEnd != null && playing && t - offset() >= sentEnd - 0.05) { sentEnd = null; unitHeard = true; player.pause(); }
     lastT = t;
   }
 
@@ -259,7 +281,7 @@ export async function renderReader(view, id) {
   }
 
   function followTo(idx, instant) {
-    if (!following) return;
+    if (!following || sentOn) return;
     const p = reader.querySelector(`p[data-i="${idx}"]`);
     if (!p) return;
     const box = mediaBox.getBoundingClientRect();
@@ -307,6 +329,9 @@ export async function renderReader(view, id) {
     // Line controls and keyboard.
     const control = (name) => {
       if (!player && name !== 'more') return;
+      if (sentOn && name === 'prev') return prevUnit();
+      if (sentOn && name === 'next') return nextUnit();
+      if (sentOn && name === 'replay') return playUnit();
       const cur = Math.max(0, activePos);
       if (name === 'prev') playLine(activePos <= 0 ? 0 : cur - 1);
       else if (name === 'next') playLine(activePos < 0 ? 0 : cur + 1);
@@ -382,20 +407,26 @@ export async function renderReader(view, id) {
         : '';
       let o = 0; // character offset of each word, for word-by-word progress
       const flags = lesson.flags?.[i] || [];
+      // Each sentence in its own span, for sentence mode.
+      const starts = sentencesOf(seg.text).map((s) => s.o);
+      let sn = 0;
       const words = tokenize(seg.text, lesson.lang).map((t) => {
+        let open = '';
+        while (sn + 1 < starts.length && o >= starts[sn + 1]) open = `</span><span class="sent" data-s="${++sn}">`;
         const k = flags.findIndex((f) => o >= f.o && o < f.o + f.len);
         const flag = k >= 0 ? ` data-flag="${k}" title="The audio may say: ${esc(flags[k].heard || '(nothing)')}"` : '';
         const html = t.n ? `<span class="w ${statusClass(t.n)}" data-n="${esc(t.n)}" data-o="${o}"${flag}>${esc(t.t)}</span>` : esc(t.t);
         o += t.t.length;
-        return html;
+        return open + html;
       }).join('');
       const tools = `<span class="line-tools">
         <button class="tr-btn" data-explain="${i}" title="Explain this line" aria-label="Explain this line">💬</button>
         <button class="tr-btn" data-tr="${i}" title="Translate this line" aria-label="Translate this line">⇄</button>
         <button class="tr-btn" data-edit="${i}" title="Correct this line" aria-label="Correct this line">✎</button></span>`;
-      return `<p class="cue" data-i="${i}" dir="auto">${time}${words}${tools}</p>`;
+      return `<p class="cue" data-i="${i}" dir="auto">${time}<span class="sent" data-s="0">${words}</span>${tools}</p>`;
     }).join('') || '<p class="muted">This lesson is empty.</p>';
     markPhrases();
+    if (sentOn) { showUnit(goLast ? Infinity : unitPage === page ? unit : 0); goLast = false; }
     if (!listen) {
       $('#pageinfo').textContent = `Page ${page + 1} of ${pages.length}`;
       $('#prev').disabled = page === 0;
@@ -439,7 +470,7 @@ export async function renderReader(view, id) {
       pausedForLookup = true;
     }
     if (reading && S.pauseOnLookup) {
-      readPausedAt = reading.para;
+      readPausedAt = reading.para >= 0 ? reading.para : null; // not a single sentence
       stopReading();
     }
   }
@@ -455,14 +486,6 @@ export async function renderReader(view, id) {
   // the character being spoken. Where a voice sends none, the paragraph is still highlighted.
   let reading = null;      // {para, u} while reading this page
   let readPausedAt = null; // paragraph to resume from after a lookup
-
-  const sentencesOf = (text) => {
-    const out = [];
-    const re = /[^.!?…]+[.!?…]*["»”’)]*\s*/g;
-    let m;
-    while ((m = re.exec(text))) if (m[0].trim()) out.push({ text: m[0], o: m.index });
-    return out.length ? out : [{ text, o: 0 }];
-  };
 
   function markSpeaking(p, c) {
     for (const s of p.querySelectorAll('.w')) {
@@ -511,7 +534,106 @@ export async function renderReader(view, id) {
     }
     if (reading === run) stopReading();
   }
-  cleanups.push(() => { readPausedAt = null; stopReading(); });
+  cleanups.push(() => { readPausedAt = null; stopReading(); view.classList.remove('sentence'); });
+
+  // ---------- sentence mode: one sentence at a time, large, with its audio and translation ----------
+  // Units are the caption lines in listen mode (that's what the timing knows), else the
+  // sentences of the page. Play stops at the end of the unit; Next plays the next one.
+  let sentOn = false;
+  let unit = 0, unitPage = -1, goLast = false;
+  let sentEnd = null;      // listen mode: pause the player here
+  let unitHeard = false;   // ...and the line played to its end: a listening pass
+
+  const units = () => [...reader.querySelectorAll(listen ? 'p.cue' : 'p.cue .sent')];
+
+  function showUnit(n, { play = false } = {}) {
+    const us = units();
+    reader.querySelectorAll('.cur').forEach((e) => e.classList.remove('cur'));
+    if (!us.length) return;
+    unit = Math.max(0, Math.min(us.length - 1, n));
+    unitPage = page;
+    unitHeard = false;
+    sentEnd = null;
+    const u = us[unit];
+    u.classList.add('cur');
+    u.closest('p').classList.add('cur');
+    $('#sent-n').textContent = `${unit + 1} / ${us.length}`;
+    $('#sent-tr').hidden = true;
+    view.querySelector('[data-sent="prev"]').disabled = unit === 0 && (listen || page === 0);
+    if (play) playUnit();
+  }
+
+  function unitText() {
+    const u = units()[unit];
+    return listen ? lesson.segments[u.dataset.i].text : u.textContent.trim();
+  }
+
+  async function playUnit() {
+    const u = units()[unit];
+    if (!u) return;
+    if (listen) {
+      if (!player) return;
+      const pos = timeline.findIndex((e) => e.i === Number(u.dataset.i));
+      if (pos < 0) return;
+      sentEnd = timeline[pos].end - offset();
+      player.seek(timeline[pos].start - offset());
+      player.play();
+      return;
+    }
+    stopReading();
+    if (!tts()) return toast('Text-to-speech is not supported on this device.');
+    const p = u.closest('p');
+    const s = sentencesOf(lesson.segments[p.dataset.i].text)[Number(u.dataset.s)];
+    const run = reading = { para: -1 };
+    await say(run, s.text, (c) => markSpeaking(p, s.o + c));
+    if (reading === run) stopReading();
+  }
+
+  function nextUnit() {
+    if (listen && unitHeard) onSegmentPassed(Number(units()[unit].dataset.i));
+    if (unit < units().length - 1) return showUnit(unit + 1, { play: listen });
+    if (listen) return toast('That was the last line.', 4000, { label: 'Finish lesson', onClick: () => $('#next').click() });
+    $('#next').click(); // the next page (counted as read), or the end of the lesson
+  }
+  function prevUnit() {
+    if (unit > 0) return showUnit(unit - 1, { play: listen });
+    if (!listen && page > 0) { goLast = true; $('#prev').click(); }
+  }
+
+  async function showUnitTr() {
+    const box = $('#sent-tr');
+    box.hidden = false;
+    box.textContent = '…';
+    const r = await translateSentence(unitText(), lesson.lang, S.native);
+    if (!$('#sent-tr')) return;
+    box.textContent = !r ? '' : r.error ? ERROR_TEXT[r.error] : r.text;
+  }
+
+  function setSentence(on) {
+    sentOn = on;
+    view.classList.toggle('sentence', on);
+    $('#sent-bar').hidden = !on;
+    $('#sent-btn').textContent = on ? '☰ Whole text' : '🔍 Sentences';
+    stopReading();
+    sentEnd = null;
+    if (on) {
+      const from = listen && activeIdx >= 0 ? units().findIndex((p) => Number(p.dataset.i) === activeIdx) : 0;
+      showUnit(from);
+      $('#sent-bar').scrollIntoView({ block: 'nearest' });
+    } else {
+      reader.querySelectorAll('.cur').forEach((e) => e.classList.remove('cur'));
+      if (listen) requestAnimationFrame(() => followTo(activeIdx, true));
+    }
+  }
+
+  $('#sent-btn').addEventListener('click', () => { setSentence(!sentOn); saveSettings({ sentenceMode: sentOn }); });
+  $('#sent-bar').addEventListener('click', (e) => {
+    const act = e.target.closest('[data-sent]')?.dataset.sent;
+    if (act === 'prev') prevUnit();
+    else if (act === 'next') nextUnit();
+    else if (act === 'play') playUnit();
+    else if (act === 'tr') showUnitTr();
+  });
 
   // Segment i joined with its neighbours when it has no sentence punctuation (auto-captions),
   // each part keeping its caption-line marks. shift = where segment i starts in the result.
@@ -797,6 +919,7 @@ export async function renderReader(view, id) {
   // The end-of-lesson summary: what this visit did, how much more of the lesson you now
   // know, and today's goal. Words are compared with their level when the lesson opened.
   async function showComplete() {
+    if (sentOn) setSentence(false);
     let lingqs = 0, known = 0, learning = 0;
     for (const [t, before] of startStatus) {
       const now = statusOf(t);
@@ -892,5 +1015,6 @@ export async function renderReader(view, id) {
 
   renderPage();
   if (listen) { $('#follow-btn').hidden = true; showFlagCount(); }
+  if (S.sentenceMode) setSentence(true);
   return () => cleanups.forEach((fn) => fn());
 }

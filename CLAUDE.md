@@ -61,6 +61,7 @@ The machine has no Node, Python, or git — tooling is PowerShell + Edge.
   - A tap pauses playback (`openPanel({onClose})` resumes it).
   - When playback moves on to the next line naturally (no seek) after ≥60% of a line has played, `onSegmentPassed` sends listen passes for its untapped words, once per line per visit.
   - Per-lesson `syncOffset` and `lastTime`.
+- **Sentence mode** (🔍 Sentences, `settings.sentenceMode`, remembered across lessons): CSS class `sentence` on `#view` shows one unit, large, with the `#sent-bar` (← ▶ Play, Translate, n/N, Next →). Units are caption lines (`p.cue`) in listen mode and sentences in page mode: `renderPage` wraps each sentence of a paragraph in `span.sent[data-s]` (`sentencesOf`). Play: the line's time window, paused by `step()` at `sentEnd` (Next then counts a listen pass), or TTS of the sentence. Next past the page's last sentence turns the page (`#next`), so read passes still come from `finishPage`. ← → R map to the units.
 
 **YouTube transcripts:** browsers can't read YouTube captions (CORS), so `serve.ps1` exposes `GET /api/transcript?v=<id>&lang=<code>[&track=<n>]`.
 - It fetches the caption track list from YouTube's InnerTube player API (Android client) and returns the chosen track as WebVTT, as JSON `{ok, title, track, tracks, vtt}` or `{ok:false, error}`.

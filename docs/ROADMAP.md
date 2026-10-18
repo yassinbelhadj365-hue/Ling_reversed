@@ -42,6 +42,9 @@ this file records where things stand, what the owner decided, and what's next.
   reads sentence by sentence with the device voice, the current word outlined; a word tap
   pauses it, closing the panel resumes. Untested on a real iPhone (whether Safari sends word
   `boundary` events for the French voice; without them only the paragraph is highlighted).
+- **Sentence mode** (reader, 2026-10-18): 🔍 Sentences shows one sentence (text) or caption
+  line (video) at a time, large, with Play (just that line, then it waits), Translate and
+  Next; remembered for the next lesson.
 - **The AI runs out less** (2026-10-18): each Gemini model has its own free limit, so when one
   is used up the next free Flash/Flash-Lite model answers (own key and shared function). The
   owner asked for this after their key ran out; other providers (Groq, Mistral) and rotating
@@ -70,8 +73,10 @@ Proposed order 1 → 2 → 3 (the owner said "continue the roadmap", so 1 was bu
 1. ~~Gemini transcribes any YouTube link~~: done (see Done).
 2. ~~Lessons written from your own LingQs~~: done (see Done).
 3. ~~Read-aloud for text lessons~~: done (see Done).
-4. **Sentence mode** for beginners: one sentence at a time, large, replay audio, reveal the
-   translation.
+4. ~~Sentence mode~~: done (see Done).
+
+All four are built. Next ideas are to be chosen with the owner after they try these on the
+iPhone with a real key (the untested points are listed under Done).
 
 ## Ideas the owner rejected (don't propose again)
 

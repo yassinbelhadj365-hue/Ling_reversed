@@ -414,3 +414,13 @@ details.more-options #help { margin-top: 10px; }
 .up-next { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .milestone-bar { margin: 4px 0 12px; text-align: left; }
 .milestone-bar .goal { margin-top: 4px; }
+
+/* Sentence mode (reader): one sentence at a time, large. */
+#view.sentence .reader .cue:not(.cur),
+#view.sentence:not(.listen) .reader .cue .sent:not(.cur) { display: none; }
+#view.sentence .reader .cue.cur { font-size: 1.6em; line-height: 1.7; text-align: center; padding: 28px 8px 12px; background: none; opacity: 1 !important; }
+#view.sentence .reader .line-tools,
+#view.sentence .reader .cue-time { display: none; }
+.sent-bar .sent-tr { font-size: 1.15em; text-align: center; margin: 0 0 12px; }
+.sent-bar .row { flex-wrap: nowrap; gap: 6px; }
+@media (max-width: 420px) { .sent-bar .btn { padding-left: 10px; padding-right: 10px; } }

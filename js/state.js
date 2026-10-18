@@ -33,6 +33,7 @@ const DEFAULTS = {
   asrModel: 'base',    // AI transcription model: 'base' | 'small' (asr.js MODELS)
   aiAuto: true,        // ask the AI automatically on tap (otherwise the panel shows an Explain button)
   geminiModel: '',     // Gemini model for translations and explanations ('' = newest free Flash, ai.js)
+  sentenceMode: false, // reader: one sentence at a time
   dailyMinutes: 10,    // daily goal: minutes of reading, listening or review (state.startStudyTimer)
   ttsRate: 0.9,
   voice: '',

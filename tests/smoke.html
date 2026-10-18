@@ -345,7 +345,7 @@ try {
   W().__lingoGemini = async (req) => {
     aiCalls.push(req);
     if (req.video) return { model: 'test-model', result: videoAnswer(req) };
-    if (req.schema?.properties?.paragraphs) return { model: 'test-model', result: { title: 'Una historia', paragraphs: ['El gato come comida.', 'Después duerme en la casa.'] } };
+    if (req.schema?.properties?.paragraphs) return { model: 'test-model', result: { title: 'Una historia', paragraphs: ['El gato come comida. Es feliz.', 'Después duerme en la casa.'] } };
     if (!req.schema.properties.meaning_native) return { model: 'test-model', result: { translation: EN[req.user] || '[EN] ' + req.user } };
     const term = /Target: "(.*)"/.exec(req.user)?.[1] || /Passage: "(.*)"/s.exec(req.user)?.[1] || '';
     const sentence = /Sentence: (.*)\n/.exec(req.user)?.[1] || term;
@@ -608,6 +608,18 @@ try {
   ok(l30[0].classList.contains('spoken') && !l30.at(-1).classList.contains('spoken'), 'words of the spoken line are underlined progressively');
   fake.set(fake.t, false);
 
+  // sentence mode with a video: one line at a time; Next plays the next line, which stops at its end
+  const shownCues = () => [...D().querySelectorAll('#reader p.cue')].filter((p) => p.offsetParent).map((p) => p.dataset.i).join();
+  D().getElementById('sent-btn').click();
+  ok(shownCues() === '30' && V().classList.contains('sentence'), 'sentence mode with a video shows only the current line: ' + shownCues());
+  D().querySelector('[data-sent="next"]').click();
+  await until(() => fake.playing);
+  ok(shownCues() === '31' && Math.abs(fake.seeks.at(-1) - 123.75) < 0.01, 'Next shows the next line and plays it from its start: ' + fake.seeks.at(-1));
+  for (let t = 123.75; t <= 129 && fake.playing; t += 0.25) { fake.set(t); await sleep(25); }
+  ok(!fake.playing && fake.t >= 127.5 && fake.t < 128.25, 'playback pauses at the end of the line: ' + fake.t);
+  D().getElementById('sent-btn').click();
+  ok(!V().classList.contains('sentence') && shownCues().split(',').length > 2, 'Whole text brings the transcript back');
+
   // listening to a line all the way through is evidence for its untapped words
   async function playThrough(from, to) {
     fake.set(from, true);
@@ -815,13 +827,39 @@ try {
   ok(D().getElementById('tts').textContent.includes('Stop') && D().querySelector('#reader p.playing')
     && D().querySelector('#reader .w.spoken[data-n="gato"]'), 'Listen reads the page aloud, highlighting the word being spoken');
   await until(() => spokenTexts.includes('Después duerme en la casa.') && D().getElementById('tts').textContent.includes('Listen'));
-  ok(spokenTexts.join('|') === 'El gato come comida.|Después duerme en la casa.' && !D().querySelector('#reader .w.speaking, #reader p.playing'),
+  ok(spokenTexts.join('|') === 'El gato come comida. |Es feliz.|Después duerme en la casa.' && !D().querySelector('#reader .w.speaking, #reader p.playing'),
     'it goes on to the next paragraph and stops at the end of the page: ' + spokenTexts.join('|'));
   D().getElementById('tts').click();
-  await until(() => spokenTexts.length === 3);
+  await until(() => spokenTexts.length === 4);
   D().getElementById('tts').click();
   await sleep(400);
-  ok(spokenTexts.length === 3 && D().getElementById('tts').textContent.includes('Listen') && !D().querySelector('#reader .w.speaking'), 'Stop stops it');
+  ok(spokenTexts.length === 4 && D().getElementById('tts').textContent.includes('Listen') && !D().querySelector('#reader .w.speaking'), 'Stop stops it');
+
+  // ---- sentence mode: one sentence at a time, with its audio and translation ----
+  const shown = () => [...D().querySelectorAll('#reader .sent')].filter((s) => s.offsetParent).map((s) => s.textContent.trim()).join('|');
+  D().getElementById('sent-btn').click();
+  await until(() => V().classList.contains('sentence'));
+  ok(shown() === 'El gato come comida.' && D().getElementById('sent-n').textContent === '1 / 3' && !D().getElementById('sent-bar').hidden,
+    'sentence mode shows only the first sentence: ' + shown());
+  D().querySelector('[data-sent="play"]').click();
+  await until(() => spokenTexts.length === 5);
+  ok(spokenTexts[4] === 'El gato come comida. ', 'Play reads just that sentence');
+  D().querySelector('[data-sent="tr"]').click();
+  await until(() => /\[EN\]/.test(D().getElementById('sent-tr').textContent));
+  ok(D().getElementById('sent-tr').textContent === '[EN] El gato come comida.' && !D().getElementById('sent-tr').hidden, 'Translate reveals its translation');
+  D().querySelector('[data-sent="next"]').click();
+  ok(shown() === 'Es feliz.' && D().getElementById('sent-tr').hidden, 'Next shows the next sentence of the same paragraph, translation hidden again');
+  D().querySelector('[data-sent="next"]').click();
+  ok(shown() === 'Después duerme en la casa.' && D().getElementById('sent-n').textContent === '3 / 3', '...then the next paragraph');
+  D().querySelector('[data-sent="prev"]').click();
+  ok(shown() === 'Es feliz.', 'Back goes back a sentence');
+  D().querySelector('[data-sent="next"]').click();
+  D().querySelector('[data-sent="next"]').click();
+  await until(() => D().querySelector('.lesson-done'));
+  ok(!V().classList.contains('sentence') && D().getElementById('sent-bar').hidden, 'Next after the last sentence finishes the page (here, the lesson)');
+  const stateM = await W().eval("import('/js/state.js')");
+  ok(stateM.state.settings.sentenceMode === true, 'sentence mode is remembered for the next lesson');
+  await stateM.saveSettings({ sentenceMode: false });
   delete W().__lingoSpeech;
   W().fetch = async (url, ...rest) => String(url).startsWith('api/')
     ? new Response('Not found', { status: 404, headers: { 'content-type': 'text/plain' } }) : realFetch(url, ...rest);
