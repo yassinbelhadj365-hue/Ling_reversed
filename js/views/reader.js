@@ -8,8 +8,9 @@
 import * as db from '../db.js';
 import {
   state, statusOf, setStatusMany, applyEvents, undoAuto, markSeen, bumpActivity, removeLessonFromPool, updateLessonLine,
-  saveSettings, speak, esc, toast, plural, startStudyTimer,
+  saveSettings, speak, esc, toast, plural, startStudyTimer, activityByDay, dayKey,
 } from '../state.js';
+import { lessonLevel } from './library.js';
 import { tokenize, formatTime, sentenceAt, contextAt } from '../text.js';
 import { translateSentence, ERROR_TEXT } from '../ai.js';
 import { NEW, KNOWN, isLearning } from '../srs.js';
@@ -62,6 +63,9 @@ export async function renderReader(view, id) {
   const pages = listen ? [lesson.segments.map((_, i) => i)] : paginate(lesson.segments, state.settings.pageSize, lesson.lang);
   let page = listen ? 0 : Math.min(lesson.page || 0, pages.length - 1);
   let clicked = new Set();
+  // The lesson's word levels when you opened it, for the end-of-lesson summary.
+  const startStatus = new Map(Object.keys(lesson.words || {}).map((t) => [t, statusOf(t)]));
+  const startLevel = lessonLevel(lesson.words);
   const cleanups = [];
   const S = state.settings;
 
@@ -138,7 +142,9 @@ export async function renderReader(view, id) {
   // ---------- media ----------
   const mediaBox = $('#media');
   const player = createPlayer(mediaBox, { youtubeId: lesson.youtubeId, blob: media?.blob, type: media?.type });
-  cleanups.push(startStudyTimer(() => !!player?.isPlaying?.())); // reading and listening time count toward the daily goal
+  // Reading and listening time count toward the daily goal; this visit's time goes in the summary.
+  let visitSecs = 0;
+  cleanups.push(startStudyTimer(() => !!player?.isPlaying?.(), (s) => { visitSecs += s; }));
   const timeline = buildTimeline(lesson.segments);
   const offset = () => lesson.syncOffset || 0;
   let dead = false;
@@ -718,19 +724,41 @@ export async function renderReader(view, id) {
       .filter(Boolean).join(' · ');
   }
 
-  function showComplete(msg) {
-    const learning = Object.keys(lesson.words).filter((t) => isLearning(statusOf(t))).length;
+  // The end-of-lesson summary: what this visit did, how much more of the lesson you now
+  // know, and today's goal. Words are compared with their level when the lesson opened.
+  async function showComplete() {
+    let lingqs = 0, known = 0, learning = 0;
+    for (const [t, before] of startStatus) {
+      const now = statusOf(t);
+      if (isLearning(now)) learning++;
+      if (isLearning(now) && !isLearning(before)) lingqs++;
+      if (now === KNOWN && before !== KNOWN) known++;
+    }
+    const level = lessonLevel(lesson.words);
+    const mins = Math.max(1, Math.round(visitSecs / 60));
+    const goal = S.dailyMinutes;
+    const todayMins = Math.floor(((await activityByDay()).get(dayKey())?.secs || 0) / 60);
+    const goalPct = Math.min(100, Math.round((todayMins / goal) * 100));
     reader.innerHTML = `
-      <div class="empty">
-        <p style="font-size:2rem;margin:0">🎉</p>
-        <p><b>Lesson complete.</b>${msg ? ` ${esc(msg)}.` : ''}</p>
-        <p>${plural(learning, 'LingQ')} from this lesson are waiting in review.</p>
-        <div class="row" style="justify-content:center">
-          <a class="btn primary" href="#/review">Review LingQs</a>
+      <div class="card lesson-done">
+        <p class="done-title">🎉 Lesson complete</p>
+        <div class="tiles">
+          <div class="tile"><div class="v">${mins}</div><div class="l">${mins === 1 ? 'minute' : 'minutes'}</div></div>
+          <div class="tile"><div class="v">${lingqs}</div><div class="l">${lingqs === 1 ? 'new LingQ' : 'new LingQs'}</div></div>
+          <div class="tile"><div class="v">${known}</div><div class="l">${known === 1 ? 'word now known' : 'words now known'}</div></div>
+        </div>
+        <p>You now know <b>${level.pct}%</b> of this lesson${level.pct > startLevel.pct ? ` (up from ${startLevel.pct}%)` : ''}.
+          <span class="level ${level.cls}">${level.label}</span></p>
+        <div class="row spread small"><span>Today’s goal${goalPct >= 100 ? ' ✓' : ''}</span><span class="muted">${todayMins} / ${goal} minutes</span></div>
+        <div class="goal" role="img" aria-label="${goalPct}% of daily goal"><div style="width:${goalPct}%"></div></div>
+        <div class="row" style="justify-content:center;margin-top:12px">
+          ${learning ? `<a class="btn primary" href="#/review">Review ${plural(learning, 'LingQ')}</a>` : ''}
+          <button class="btn ${learning ? '' : 'primary'}" id="again" title="Meeting the same words again helps them stick">${listen ? 'Listen again' : 'Read again'}</button>
           <a class="btn" href="#/library">Library</a>
         </div>
       </div>`;
     view.querySelector('.pager, .follow-bar').hidden = true;
+    $('#again').addEventListener('click', () => window.dispatchEvent(new HashChangeEvent('hashchange'))); // reopen it from the start
   }
 
   $('#next').addEventListener('click', async () => {
@@ -740,7 +768,7 @@ export async function renderReader(view, id) {
       player?.pause();
       lesson.completed = true;
       await db.put('lessons', lesson);
-      showComplete(summarize([...session.entries()].map(([term, c]) => ({ term, ...c }))));
+      showComplete();
       return;
     }
     const changes = await finishPage();
@@ -764,7 +792,7 @@ export async function renderReader(view, id) {
       lesson.completed = true;
       lesson.page = 0;
       await db.put('lessons', lesson);
-      showComplete(msg);
+      showComplete();
     }
   });
 

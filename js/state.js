@@ -358,15 +358,16 @@ export async function activityByDay() {
 // Counts study time (reading, listening, reviewing) in 15-second steps while the page is
 // visible and the learner is active: media playing, or a tap, scroll or key in the last
 // minute. Shows a toast the moment the daily goal (settings.dailyMinutes) is reached.
-// -> stop()
+// onStep(seconds) is called for each counted step (e.g. to time one lesson visit). -> stop()
 const STUDY_STEP = 15;
-export function startStudyTimer(isPlaying = () => false) {
+export function startStudyTimer(isPlaying = () => false, onStep = null) {
   let lastInput = Date.now();
   const onInput = () => { lastInput = Date.now(); };
   const events = ['pointerdown', 'keydown', 'wheel', 'touchstart', 'scroll'];
   events.forEach((e) => window.addEventListener(e, onInput, { passive: true, capture: true }));
   const timer = setInterval(async () => {
     if (document.hidden || !(isPlaying() || Date.now() - lastInput < 60000)) return;
+    onStep?.(STUDY_STEP);
     await bumpActivity({ secs: STUDY_STEP });
     const goal = state.settings.dailyMinutes * 60;
     const secs = (await activityByDay()).get(dayKey())?.secs || 0;

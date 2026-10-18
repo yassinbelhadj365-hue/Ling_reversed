@@ -357,12 +357,16 @@ try {
   D().getElementById('next').click();
   await until(() => /Lesson complete/.test(D().getElementById('reader').textContent));
   ok(/Lesson complete/.test(D().getElementById('reader').textContent), 'lesson completed');
-  ok(/13 words moved to known/.test(D().getElementById('reader').textContent), 'completion reports 13 words moved to known by reading');
+  const doneTiles = [...D().querySelectorAll('#reader .lesson-done .tile')].map((t) => `${t.querySelector('.v').textContent} ${t.querySelector('.l').textContent}`);
+  ok(doneTiles.includes('13 words now known'), 'completion reports 13 words moved to known by reading: ' + doneTiles);
+  ok(doneTiles.some((t) => /new LingQ/.test(t)) && /You now know \d+% of this lesson/.test(D().getElementById('reader').textContent)
+    && /\/ 10 minutes/.test(D().querySelector('#reader .lesson-done').textContent) && D().querySelector('#reader #again'),
+    'the summary shows new LingQs, how much of the lesson you now know, today’s goal and “Read again”');
   ok(/\+13 known/.test(D().getElementById('session-chip').textContent), 'session chip: ' + D().getElementById('session-chip').textContent);
 
   // vocab pool
   W().location.hash = '#/vocab';
-  await until(() => D().querySelector('.tiles'));
+  await until(() => /word pool/.test(D().querySelector('#view h1')?.textContent || '') && D().querySelector('.tiles'));
   const tiles = [...D().querySelectorAll('.tile .v')].map((t) => t.textContent);
   ok(tiles[1] === '13', `known words after paging: ${tiles[1]} (expect 13 = 16 unique − comida − muy − rica)`);
   ok(tiles[2] === '2', `LingQs: ${tiles[2]} (comida + "muy rica")`);
