@@ -4,8 +4,8 @@
 // own. Deploy it as a function named "ai" and add the secret GEMINI_API_KEY
 // (docs/SYNC_SETUP.md). Optional secret GEMINI_MODEL overrides the default model.
 //
-//   POST /functions/v1/ai  {system, user, schema?, model?, fast?}
-//   -> {ok: true, text, model} | {ok: false, status?, error}
+//   POST /functions/v1/ai  {system, user, schema?, model?, fast?, video?: {url, start?, end?}}
+//   -> {ok: true, text, model, video?: true} | {ok: false, status?, error}
 
 const DEFAULT_MODEL = Deno.env.get('GEMINI_MODEL') || 'gemini-2.5-flash';
 const MAX_CHARS = 60000; // about the 30k-character transcript excerpt plus the prompt
@@ -39,11 +39,19 @@ Deno.serve(async (req) => {
   const key = Deno.env.get('GEMINI_API_KEY');
   if (!key) return reply({ ok: false, error: 'The shared AI key isn’t set up on the sync server yet (secret GEMINI_API_KEY).' });
 
-  let body: { system?: string; user?: string; schema?: unknown; model?: string; fast?: boolean };
+  let body: { system?: string; user?: string; schema?: unknown; model?: string; fast?: boolean;
+    video?: { url?: string; start?: number; end?: number } };
   try { body = await req.json(); } catch { return reply({ ok: false, error: 'Bad request' }); }
   const system = String(body.system || ''), user = String(body.user || '');
   if (!user || system.length + user.length > MAX_CHARS) return reply({ ok: false, error: 'Request too large' });
   const model = /^gemini-[\w.-]+$/.test(body.model || '') ? body.model! : DEFAULT_MODEL;
+  // A public YouTube video to transcribe (js/video-ai.js), optionally one part of it.
+  const v = body.video;
+  if (v && !/^https:\/\/www\.youtube\.com\/watch\?v=[\w-]{11}$/.test(v.url || '')) return reply({ ok: false, error: 'Bad video link' });
+  const videoParts = !v ? [] : [{
+    fileData: { fileUri: v.url },
+    ...(v.end ? { videoMetadata: { startOffset: `${Math.max(0, Number(v.start) || 0)}s`, endOffset: `${Number(v.end) || 0}s` } } : {}),
+  }];
 
   // Quick lookups get only a little "thinking" (same rule as js/ai.js thinkingLight).
   const thinking = !body.fast ? null
@@ -54,9 +62,10 @@ Deno.serve(async (req) => {
     headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
     body: JSON.stringify({
       systemInstruction: { parts: [{ text: system }] },
-      contents: [{ role: 'user', parts: [{ text: user }] }],
+      contents: [{ role: 'user', parts: [...videoParts, { text: user }] }],
       generationConfig: {
         temperature: 0, responseMimeType: 'application/json',
+        ...(v ? { mediaResolution: 'MEDIA_RESOLUTION_LOW' } : {}),
         ...(body.schema ? { responseSchema: body.schema } : {}),
         ...(withThinking && thinking ? { thinkingConfig: thinking } : {}),
       },
@@ -72,7 +81,7 @@ Deno.serve(async (req) => {
     }
     if (!res.ok) return reply({ ok: false, status: res.status, error: data?.error?.message || res.statusText });
     const text = (data?.candidates?.[0]?.content?.parts || []).map((p: { text?: string }) => p.text || '').join('');
-    return reply({ ok: true, text, model });
+    return reply({ ok: true, text, model, ...(v ? { video: true } : {}) });
   } catch {
     return reply({ ok: false, error: 'Couldn’t reach Google’s AI from the server.' });
   }

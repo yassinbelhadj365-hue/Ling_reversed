@@ -79,14 +79,23 @@ export function thinkingLight(model) {
   return null;
 }
 
+// A public YouTube video as input, optionally one part of it ({url, start, end} in seconds).
+export function videoPart(video) {
+  if (!video) return [];
+  const clip = video.end ? { videoMetadata: { startOffset: `${video.start || 0}s`, endOffset: `${video.end}s` } } : {};
+  return [{ fileData: { fileUri: video.url }, ...clip }];
+}
+
 // The request body Gemini expects (supabase/functions/ai builds the same one).
-export function requestBody({ system, user, schema, fast = false }, model = '') {
+export function requestBody({ system, user, schema, fast = false, video = null }, model = '') {
   const thinking = fast && thinkingLight(model);
   return {
     systemInstruction: { parts: [{ text: system }] },
-    contents: [{ role: 'user', parts: [{ text: user }] }],
+    contents: [{ role: 'user', parts: [...videoPart(video), { text: user }] }],
     generationConfig: {
       temperature: 0, responseMimeType: 'application/json',
+      // Low resolution: the sound is what matters, and it uses a third of the free quota.
+      ...(video ? { mediaResolution: 'MEDIA_RESOLUTION_LOW' } : {}),
       ...(schema ? { responseSchema: schema } : {}),
       ...(thinking ? { thinkingConfig: thinking } : {}),
     },
@@ -121,6 +130,8 @@ async function shared(req) {
   const r = await callFunction('ai', {}, { body: { ...req, model: state.settings.geminiModel || '' } });
   if (!r) throw new Error('Couldn’t reach the shared AI (offline, or not set up on the sync server). You can add your own free key in Settings.');
   if (!r.ok) throw new Error(r.status ? errorText(r.status, r.error) : r.error || 'AI error');
+  // An older function ignores the video, and the answer would be made up.
+  if (req.video && !r.video) throw new Error('The shared AI on your sync server is too old to watch videos: redeploy its “ai” function (docs/SYNC_SETUP.md), or add your own free key in Settings.');
   return { result: parseJsonReply(r.text), model: r.model };
 }
 

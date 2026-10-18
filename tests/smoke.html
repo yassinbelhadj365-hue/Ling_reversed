@@ -17,6 +17,8 @@ import { excerptAround, buildPrompt } from '../js/explain.js';
 import { parseShortcut, pickShortcutTrack } from '../js/youtube.js';
 import { lessonLevel, lessonProgress, continueCard } from '../js/views/library.js';
 import { milestoneFor, weekStart, recapOf, checkMilestone, milestoneProgress, milestoneBarHtml } from '../js/progress.js';
+import { parseStamp } from '../js/video-ai.js';
+import { requestBody } from '../js/ai.js';
 
 // A scriptable stand-in for the YouTube/media player (js/player.js test hook).
 function makeFakePlayer() {
@@ -167,6 +169,13 @@ try {
   ok(sk3.days === 2 && sk3.saved === 1, 'streak: only one saved day per week ' + JSON.stringify(sk3));
   ok(streakOf(new Map(), NOW).days === 0, 'streak: nothing yet');
 
+  // ---- unit: Gemini video transcripts (video-ai.js, ai.js) ----
+  ok(parseStamp('01:05') === 65 && parseStamp('1:02:03') === 3723 && parseStamp('75.5s') === 75.5 && parseStamp(12) === 12 && Number.isNaN(parseStamp('soon')), 'parseStamp');
+  const vb = requestBody({ system: 's', user: 'u', video: { url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ', start: 600, end: 1200 } });
+  ok(vb.contents[0].parts[0].fileData.fileUri.endsWith('dQw4w9WgXcQ') && vb.contents[0].parts[0].videoMetadata.startOffset === '600s'
+    && vb.contents[0].parts[1].text === 'u' && vb.generationConfig.mediaResolution === 'MEDIA_RESOLUTION_LOW'
+    && !requestBody({ system: 's', user: 'u' }).generationConfig.mediaResolution, 'a video request sends the YouTube link and the part, at low resolution');
+
   // ---- unit: milestones and the weekly recap (progress.js) ----
   ok(milestoneFor(99) === 0 && milestoneFor(100) === 100 && milestoneFor(999) === 500 && milestoneFor(12000) === 10000, 'milestoneFor');
   const mon = weekStart(new Date(2026, 9, 18, 15)); // Sunday 18 Oct 2026 → Monday 12 Oct
@@ -304,8 +313,10 @@ try {
     grammar: '', examples: [], examples_native: [], lemma: term, part_of_speech: '', multiword_unit: null, same_meaning_as: 1,
   });
   let aiAnswer = null; // set by a test to answer differently
+  let videoAnswer = null; // set by a test: transcripts of a YouTube video (js/video-ai.js)
   W().__lingoGemini = async (req) => {
     aiCalls.push(req);
+    if (req.video) return { model: 'test-model', result: videoAnswer(req) };
     if (!req.schema.properties.meaning_native) return { model: 'test-model', result: { translation: EN[req.user] || '[EN] ' + req.user } };
     const term = /Target: "(.*)"/.exec(req.user)?.[1] || /Passage: "(.*)"/s.exec(req.user)?.[1] || '';
     const sentence = /Sentence: (.*)\n/.exec(req.user)?.[1] || term;
@@ -708,9 +719,36 @@ try {
   W().fetch = realFetch;
   delete W().__lingoASR;
 
-  // ---- on a phone (no transcript server), not signed in: explain what to do ----
+  // ---- on a phone (no transcript server) with an AI: Gemini transcribes the video itself ----
   W().fetch = async (url, ...rest) => String(url).startsWith('api/')
     ? new Response('Not found', { status: 404, headers: { 'content-type': 'text/plain' } }) : realFetch(url, ...rest);
+  const parts = [];
+  videoAnswer = (req) => {
+    parts.push(req.video);
+    return req.video.start === 0
+      ? { title: 'Un vídeo largo', lines: [{ start: '00:05', text: 'Hola a todos.' }, { start: '09:00', text: 'Seguimos  después.' }] }
+      : { lines: [{ start: '00:00', text: 'Seguimos después.' }, { start: '00:10', text: 'Y esto es el final.' }] }; // counted from the part
+  };
+  W().location.hash = '#/import';
+  await until(() => D().getElementById('yt') && !D().getElementById('text').value);
+  D().getElementById('text').value = 'https://youtu.be/dQw4w9WgXcQ';
+  D().getElementById('text').dispatchEvent(new Event('input'));
+  await until(() => /Gemini wrote/.test(D().getElementById('yt-status').textContent) || /couldn’t|can’t/.test(D().getElementById('yt-status').textContent));
+  const gVtt = D().getElementById('text').value;
+  ok(/Gemini wrote/.test(D().getElementById('yt-status').textContent) && parts.length === 2 && parts[0].url === 'https://www.youtube.com/watch?v=dQw4w9WgXcQ'
+    && parts[1].start === 600 && parts[1].end === 1200 && D().getElementById('title').value === 'Un vídeo largo',
+    'with no way to download captions, Gemini transcribes the video in 10-minute parts: ' + D().getElementById('yt-status').textContent + JSON.stringify(parts));
+  ok(/^00:00:05\.000 --> /m.test(gVtt) && /^00:09:00\.000 --> /m.test(gVtt) && /^00:10:10\.000 --> [^\n]*\nY esto es el final\./m.test(gVtt)
+    && (gVtt.match(/Seguimos/g) || []).length === 1, 'its lines are timed from the start of the video, without the repeat at the join: ' + gVtt);
+  D().getElementById('go').click();
+  await until(() => V().classList.contains('listen') && /final/.test(D().getElementById('reader').textContent));
+  const gLesson = await db.get('lessons', W().location.hash.split('/').pop());
+  ok(gLesson.asr === true && gLesson.youtubeId === 'dQw4w9WgXcQ' && gLesson.segments.length >= 1, 'the lesson plays the video and remembers its transcript is by AI');
+  videoAnswer = null;
+
+  // ---- on a phone (no transcript server), not signed in, no AI: explain what to do ----
+  const savedGemini = W().__lingoGemini;
+  delete W().__lingoGemini;
   W().location.hash = '#/import';
   await until(() => D().getElementById('yt') && !D().getElementById('text').value);
   D().getElementById('yt').value = 'https://youtu.be/dQw4w9WgXcQ';
@@ -718,6 +756,7 @@ try {
   await until(() => /can’t download/.test(D().getElementById('yt-status').textContent));
   ok(D().querySelector('#yt-status a[href="#/account"]') && D().getElementById('help'), 'without a server, the phone explains how to import (account link, help)');
   W().fetch = realFetch;
+  W().__lingoGemini = savedGemini;
 
   // ---- database v1 -> v2 migration (unique lesson ids, per-device activity) ----
   await new Promise((resolve, reject) => {

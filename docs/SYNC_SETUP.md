@@ -60,6 +60,12 @@ They can still add their own free key in Settings to get their own daily limit.
 Everyone shares the free tier's limits (a few requests per minute and a daily cap). Each answer is
 cached on the device, so tapping the same word in the same sentence again costs nothing.
 
+The same function also lets Gemini **write the transcript of a YouTube video** when nothing else
+can download its captions (an iPhone using the website, say). It watches the public video
+itself, in 10-minute parts; Google's free tier allows several hours of YouTube video a day.
+If you deployed `ai` before October 2026, paste the new `index.ts` and deploy again: older
+versions can't send the video, and the app refuses to use them for this.
+
 ## How it works
 
 - **Multiple accounts:** each account has its own data on each device. **This device only** is a

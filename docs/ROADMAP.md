@@ -29,6 +29,11 @@ this file records where things stand, what the owner decided, and what's next.
   summary, known-word milestones with a celebration, weekly recap, a bar to the next
   milestone, "Continue / Up next" at the top of the Library, first-run welcome with sample
   lessons (js/samples.js), one-box Import.
+- **Gemini transcribes any YouTube link** (js/video-ai.js, 2026-10-18): when no captions can be
+  downloaded (iPhone website), Gemini watches the public video in 10-minute parts and writes a
+  timed, punctuated transcript; the lesson plays the video as usual. Also used by "Transcribe
+  the audio with AI" without a local server. Covered by smoke tests with a stubbed Gemini;
+  **not yet tried with a real key** (quality, timestamp accuracy, speed, free-tier limits).
 - **Phone**: Capacitor app in `mobile/`, built by GitHub Actions (APK + unsigned IPA,
   docs/MOBILE.md); YouTube captions fetched by the native app (js/youtube.js); file picker
   that iPhones don't grey out; iPhone Shortcut route (docs/IPHONE_SHORTCUT.md). The owner
@@ -39,21 +44,18 @@ this file records where things stand, what the owner decided, and what's next.
 - Add a free Gemini key in Settings (aistudio.google.com/apikey), or deploy the shared `ai`
   function with the `GEMINI_API_KEY` secret (docs/SYNC_SETUP.md). Without one, lookups say
   "No AI is set up yet". Real-key translation quality has **not** been tested yet.
+- If the shared `ai` function was deployed before 2026-10-18, redeploy it (new `index.ts`) so
+  Gemini can transcribe videos through it. Then try a real French video on the iPhone and check
+  the timestamps line up with the speech.
 - Optional: the `transcript` Edge Function (cloud helper) so pasting a link works on iPhone.
 - Optional, Android only: signing key secrets so APK updates keep data (docs/MOBILE.md).
 
 ## Next: the owner's chosen direction ("think like LingQ's owner")
 
 Content at the right level that's easy to get is the main gap; the habit side is covered.
-Proposed order 1 → 2 → 3 (the owner hadn't picked yet when this was written):
+Proposed order 1 → 2 → 3 (the owner said "continue the roadmap", so 1 was built first):
 
-1. **Gemini transcribes any YouTube link** (fixes iPhone import, the owner's most repeated
-   pain). The Gemini API accepts a public YouTube URL as video input
-   (`contents.parts: [{fileData: {fileUri: 'https://www.youtube.com/watch?v=…'}}, {text: …}]`).
-   Ask for a transcript in the original language with timestamps, return WebVTT, feed it to
-   the existing import path (`relay.createLesson`). Try it in `relay.fetchTranscript` after
-   the local server / phone / cloud helper fail, before the computer relay. Unverified: free
-   tier limits for video input, and timestamp accuracy. Test with a real key first.
+1. ~~Gemini transcribes any YouTube link~~: done (see Done). Next is 2.
 2. **Lessons written from your own LingQs**: "write me a story at my level about [topic]".
    Gemini writes ~150–300 words using mostly known words plus 5–10 LingQs being learned, at
    the learner's level; becomes a normal lesson, so words get met again in new contexts
