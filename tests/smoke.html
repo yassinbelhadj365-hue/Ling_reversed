@@ -442,11 +442,12 @@ try {
   const realOpen = W().open;
   W().open = (url) => { opened.push(url); return null; };
   D().querySelector('#word-panel details.more summary').click();
-  D().querySelector('#word-panel [data-act="deep"]').click();
-  await until(() => /Explicación más detallada/.test(D().querySelector('#assist-area')?.textContent || ''));
-  ok(/test-model/.test(D().querySelector('#assist-area').textContent), 'the longer answer is shown in the panel');
-  ok(/Esta casa es grande/.test(D().querySelector('#assist-area').textContent) && /This house is big/.test(D().querySelector('#assist-area').textContent),
-    '“More detail” adds Spanish examples, each with its English translation');
+  await until(() => /Esta casa es grande/.test(D().querySelector('#assist-area')?.textContent || ''));
+  ok(/test-model/.test(D().querySelector('#assist-area').textContent) && aiReq.schema.properties.examples, 'opening More fetches the examples by itself (no extra button)');
+  ok(/Esta casa es grande/.test(D().querySelector('#assist-area').textContent) && /This house is big/.test(D().querySelector('#assist-area').textContent)
+    && D().querySelector('#word-panel .more > #assist-area') === D().querySelector('#word-panel .more > :not(summary)'),
+    'the examples come first under More, each with its English translation');
+  ok(!D().querySelector('#word-panel [data-act="deep"]'), 'no separate “More detail” button');
   ok(aiReq.user.includes(lines[3]) && /examples/.test(aiReq.system) && /simple Spanish/.test(aiReq.system),
     'the deeper question includes the transcript and asks for Spanish explanations with examples');
   D().querySelector('#word-panel [data-act="chatgpt"]').click();

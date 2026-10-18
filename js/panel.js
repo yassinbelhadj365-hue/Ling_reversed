@@ -127,7 +127,7 @@ function render() {
     panel.innerHTML = `${head('Selected text', 'small-title')}
       <div id="answer-area">${answerAreaHtml()}</div>
       ${chipsHtml()}
-      <details class="more"><summary>More</summary>
+      <details class="more" ${current.moreOpen ? 'open' : ''}><summary>More</summary>
         <div id="assist-area">${assistHtml()}</div>
         ${flagBtn ? `<div class="row">${flagBtn}</div>` : ''}
       </details>`;
@@ -149,7 +149,8 @@ function render() {
       <button data-s="${KNOWN}" class="${status === KNOWN ? 'on' : ''}" title="Known (key K)">✓ Known</button>
     </div>
     ${undoLine(w)}
-    <details class="more"><summary>More</summary>
+    <details class="more" ${current.moreOpen ? 'open' : ''}><summary>More</summary>
+      <div id="assist-area">${assistHtml()}</div>
       <div class="muted small">${STATUS_LABEL[status]}${where}</div>
       ${autoLine(w)}
       <div class="field" style="margin-top:8px">
@@ -157,7 +158,6 @@ function render() {
         <textarea id="hint" rows="2" style="min-height:48px" placeholder="Filled in with the meaning; change it if you like">${esc(w?.hint || '')}</textarea>
       </div>
       ${related.length ? `<p class="small">In phrases: ${related.map((r) => `<button class="btn small" data-open="${esc(r.term)}">${esc(r.term)}</button>`).join(' ')}</p>` : ''}
-      <div id="assist-area">${assistHtml()}</div>
       <div class="row">
         <button class="btn small" data-s="${IGNORED}" title="Ignore — names, typos (key X)">${status === IGNORED ? 'Ignored' : 'Ignore'}</button>
         ${status !== NEW ? `<button class="btn small" data-s="${NEW}">Reset to new</button>` : ''}
@@ -283,15 +283,15 @@ function markIn(text, part) {
   return `${esc(text.slice(0, at))}<mark>${esc(text.slice(at, end))}</mark>${esc(text.slice(end))}`;
 }
 
-// "More detail": grammar and examples, from a longer look at the transcript.
+// Under "More": examples and grammar, from a longer look at the transcript (loaded when More opens).
 function detailHtml(x) {
   const r = x.result || {};
   const examples = (r.examples || []).map((e, k) => `<li dir="auto">${esc(e)}${r.examples_native?.[k]
     ? `<div class="small muted" dir="auto">${esc(r.examples_native[k])}</div>` : ''}</li>`).join('');
+  // Examples first (each with its translation), then the grammar note.
   return `<div class="explain">
-    ${r.meaning_target ? `<p class="ex-meaning" dir="auto">${esc(r.meaning_target)}</p>` : ''}
+    ${examples ? `<div class="small muted">Examples</div><ul class="examples">${examples}</ul>` : ''}
     ${r.grammar ? `<p class="small" dir="auto">${esc(r.grammar)}</p>` : ''}
-    ${examples ? `<ul class="examples">${examples}</ul>` : ''}
     <div class="small muted">${esc(x.source || '')}</div>
   </div>`;
 }
@@ -304,8 +304,8 @@ function assistHtml() {
   if (!current.context) return '';
   const d = current.deep, h = current.handoff;
   let body = '';
-  if (d?.state === 'loading') body = '<p class="small muted">Looking more closely (the AI reads more of the transcript)…</p>';
-  else if (d?.state === 'error') body = `<p class="small">${esc(d.msg)}</p>`;
+  if (!d || d.state === 'loading') body = '<p class="small muted">Finding examples…</p>';
+  else if (d.state === 'error') body = `<p class="small">${esc(d.msg)}</p><button class="btn small" data-act="deep">Try again</button>`;
   else if (d?.state === 'none') body = '<p class="small">Log in to your account or add a free Gemini key in Settings, or use DeepSeek / ChatGPT.</p>';
   else if (d?.state === 'done') body = detailHtml(d);
   if (h) {
@@ -320,12 +320,11 @@ function assistHtml() {
       : `<p class="small handoff">Opened a private ChatGPT chat with your question${h.copied ? ' (also copied — press Ctrl+V if the box is empty)' : ''}.</p>`;
   }
   return `<div class="assist">
-      <div class="row">
-        <button class="btn small" data-act="deep" title="Grammar and examples, with more of the transcript">More detail</button>
+      ${body}
+      <div class="row"><span class="small muted">Still unclear? Ask</span>
         <button class="btn small" data-act="deepseek" title="Copies the question (with the transcript) and opens DeepSeek’s free chat">DeepSeek ↗</button>
         <button class="btn small" data-act="chatgpt" title="Opens a private ChatGPT chat with the question (uses your own account)">ChatGPT ↗</button>
       </div>
-      ${body}
     </div>`;
 }
 
@@ -423,6 +422,13 @@ panel.addEventListener('click', (e) => {
   if (t.dataset.open) return openPanel(t.dataset.open, { context: current.context, transcript: current.transcript, onChange: current.onChange, onClose: current.onClose });
   if (t.dataset.s !== undefined) return changeStatus(Number(t.dataset.s));
 });
+
+// Opening "More" fetches the examples (with their translations) right away.
+panel.addEventListener('toggle', (e) => {
+  if (!current || !e.target.matches?.('details.more')) return;
+  current.moreOpen = e.target.open;
+  if (e.target.open && !current.deep) loadExplain({ depth: 'deep' });
+}, true);
 
 panel.addEventListener('change', (e) => {
   if (current && e.target.id === 'hint') saveHint(e.target.value);
