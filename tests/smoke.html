@@ -15,8 +15,8 @@ import { parseJsonReply, listModels } from '../js/ai.js';
 import { compareLine, heardBetween } from '../js/check.js';
 import { excerptAround, buildPrompt } from '../js/explain.js';
 import { parseShortcut, pickShortcutTrack } from '../js/youtube.js';
-import { lessonLevel } from '../js/views/library.js';
-import { milestoneFor, weekStart, recapOf, checkMilestone } from '../js/progress.js';
+import { lessonLevel, lessonProgress, continueCard } from '../js/views/library.js';
+import { milestoneFor, weekStart, recapOf, checkMilestone, milestoneProgress, milestoneBarHtml } from '../js/progress.js';
 
 // A scriptable stand-in for the YouTube/media player (js/player.js test hook).
 function makeFakePlayer() {
@@ -191,6 +191,17 @@ try {
   ok(!document.querySelector('.celebrate'), 'milestones: each one is celebrated once');
   await db.del('kv', 'milestone|es');
   pageState.state.vocab = savedVocab;
+
+  // ---- unit: progress toward the next milestone, how far through a lesson, Continue ----
+  const mp = milestoneProgress(208);
+  ok(mp.from === 100 && mp.to === 250 && mp.left === 42 && mp.pct === 72 && milestoneProgress(10001) === null, 'milestoneProgress: the stretch to the next milestone ' + JSON.stringify(mp));
+  ok(/42<\/b> words to 250 known/.test(milestoneBarHtml(208)), 'the bar says how many words to go');
+  ok(lessonProgress({ segments: [{ start: 0 }, { start: 100 }], lastTime: 42 }) === 42 && lessonProgress({ wordCount: 1000, page: 2 }, 250) === 50
+    && lessonProgress({ completed: true }) === 100, 'lessonProgress: by playback position or page');
+  const lsA = { id: 'a', title: 'Old', openedAt: 1, words: {} }, lsB = { id: 'b', title: 'Recent', openedAt: 5, words: {}, wordCount: 500, page: 1 };
+  const cc1 = continueCard([lsA, lsB, { id: 'c', title: 'Done', openedAt: 9, completed: true, words: {} }]);
+  ok(/Continue[\s\S]*Recent/.test(cc1) && /href="#\/lesson\/b"/.test(cc1) && /Up next: <a href="#\/lesson\/a"/.test(cc1), 'continueCard: the last unfinished lesson, and an up-next one');
+  ok(continueCard([]) === '' && /Start with/.test(continueCard([lsA].map((l) => ({ ...l, openedAt: 0 })))), 'continueCard: nothing to show, or a first suggestion');
 
   // ---- unit: lesson difficulty (library.js lessonLevel) ----
   const st = { el: 5, la: 5, gato: 0, ana: -1, come: 2 };

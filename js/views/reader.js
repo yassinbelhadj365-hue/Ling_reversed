@@ -11,6 +11,7 @@ import {
   saveSettings, speak, esc, toast, plural, startStudyTimer, activityByDay, dayKey,
 } from '../state.js';
 import { lessonLevel } from './library.js';
+import { milestoneBarHtml } from '../progress.js';
 import { tokenize, formatTime, sentenceAt, contextAt } from '../text.js';
 import { translateSentence, ERROR_TEXT } from '../ai.js';
 import { NEW, KNOWN, isLearning } from '../srs.js';
@@ -749,6 +750,7 @@ export async function renderReader(view, id) {
         </div>
         <p>You now know <b>${level.pct}%</b> of this lesson${level.pct > startLevel.pct ? ` (up from ${startLevel.pct}%)` : ''}.
           <span class="level ${level.cls}">${level.label}</span></p>
+        ${milestoneBarHtml()}
         <div class="row spread small"><span>Today’s goal${goalPct >= 100 ? ' ✓' : ''}</span><span class="muted">${todayMins} / ${goal} minutes</span></div>
         <div class="goal" role="img" aria-label="${goalPct}% of daily goal"><div style="width:${goalPct}%"></div></div>
         <div class="row" style="justify-content:center;margin-top:12px">

@@ -1,5 +1,5 @@
 import * as db from '../db.js';
-import { LANGS, lang, langName, statusOf, esc } from '../state.js';
+import { state, LANGS, lang, langName, statusOf, esc } from '../state.js';
 import { NEW, KNOWN, IGNORED, isLearning } from '../srs.js';
 import { myJobs, jobStatusText, cancelJob, retryJob, createLesson } from '../relay.js';
 import { hasProvider } from '../ai.js';
@@ -25,6 +25,38 @@ export function lessonLevel(words, status = statusOf) {
   if (pct >= 95) return { pct, label: 'Easy', cls: 'easy' };
   if (pct >= 85) return { pct, label: 'Good level', cls: 'good' };
   return { pct, label: 'Challenging', cls: 'hard' };
+}
+
+// How far through a lesson you are, 0–100: the playback position for videos, else the page.
+export function lessonProgress(l, pageSize = state.settings.pageSize) {
+  if (l.completed) return 100;
+  const lastStart = l.segments?.at(-1)?.start;
+  if (l.lastTime && lastStart) return Math.min(99, Math.round((l.lastTime / lastStart) * 100));
+  const pages = Math.max(1, Math.ceil((l.wordCount || 0) / pageSize));
+  return Math.min(99, Math.round(((l.page || 0) / pages) * 100));
+}
+
+// The top of the Library: one obvious next step. "Continue" is the lesson you opened last
+// and haven't finished; "Up next" is an unfinished lesson at a good level for you (the
+// one you know most of among 85–95%, else the easiest). '' when there's nothing to suggest.
+export function continueCard(lessons) {
+  const open = lessons.filter((l) => !l.completed);
+  const last = open.filter((l) => l.openedAt).sort((a, b) => b.openedAt - a.openedAt)[0];
+  const rest = open.filter((l) => l !== last).map((l) => ({ l, lvl: lessonLevel(l.words) }));
+  const pick = (cls) => rest.filter((x) => x.lvl.cls === cls).sort((a, b) => b.lvl.pct - a.lvl.pct)[0];
+  const next = pick('good') || pick('easy') || rest.sort((a, b) => b.lvl.pct - a.lvl.pct)[0];
+  if (!last && !next) return '';
+  const pct = last ? lessonProgress(last) : 0;
+  return `<div class="card continue">
+    ${last ? `<a class="continue-main" href="#/lesson/${last.id}">
+        <span class="small muted">Continue</span>
+        <b dir="auto">${esc(last.title)}</b>
+        <div class="meter" role="img" aria-label="${pct}% through"><div style="width:${pct}%"></div></div>
+        <span class="small muted">${pct ? `${pct}% through` : 'Just started'}</span>
+      </a>` : ''}
+    ${next ? `<div class="small up-next">${last ? 'Up next' : 'Start with'}: <a href="#/lesson/${next.l.id}" dir="auto">${esc(next.l.title)}</a>
+        <span class="level ${next.lvl.cls}">${next.lvl.label} · you know ${next.lvl.pct}%</span></div>` : ''}
+  </div>`;
 }
 
 // Imports this phone asked the computer to do.
@@ -135,6 +167,7 @@ export async function renderLibrary(view) {
   view.innerHTML = `
     <div class="row spread"><h1>${esc(langName(lang()))} library</h1><a class="btn primary small" href="#/import">+ Import</a></div>
     ${jobs}
+    ${continueCard(lessons)}
     ${recap}
     <div class="field"><input type="search" id="q" placeholder="Search lessons…" aria-label="Search lessons"></div>
     <div class="lesson-list" id="list">${cards}</div>`;

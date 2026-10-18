@@ -404,3 +404,12 @@ details.more-options #help { margin-top: 10px; }
 }
 @keyframes confetti-fall { to { transform: translateY(110vh) rotate(540deg); opacity: .2; } }
 @media (prefers-reduced-motion: reduce) { .confetti { display: none; } }
+
+/* ---------- library: continue / up next ---------- */
+.continue { display: grid; gap: 8px; }
+.continue-main { display: grid; gap: 4px; color: inherit; text-decoration: none; }
+.continue-main b { font-size: 1.1rem; }
+.continue-main:hover b { text-decoration: underline; }
+.up-next { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.milestone-bar { margin: 4px 0 12px; text-align: left; }
+.milestone-bar .goal { margin-top: 4px; }

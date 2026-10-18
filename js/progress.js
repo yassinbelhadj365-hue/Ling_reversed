@@ -15,6 +15,25 @@ export function knownCount() {
 // The highest milestone at or below n, or 0.
 export const milestoneFor = (n) => MILESTONES.filter((m) => m <= n).pop() || 0;
 
+// Progress from the last milestone to the next one (people push harder as a goal gets
+// close, so the bar shows this stretch, not the whole way). -> {known, from, to, pct, left} | null
+export function milestoneProgress(known = knownCount()) {
+  const to = MILESTONES.find((m) => m > known);
+  if (!to) return null;
+  const from = milestoneFor(known);
+  return { known, from, to, left: to - known, pct: Math.floor(((known - from) / (to - from)) * 100) };
+}
+
+export function milestoneBarHtml(known) {
+  const p = milestoneProgress(known);
+  if (!p) return '';
+  return `<div class="milestone-bar">
+    <div class="row spread small"><span><b>${p.left.toLocaleString()}</b> ${p.left === 1 ? 'word' : 'words'} to ${p.to.toLocaleString()} known</span>
+      <span class="muted">${p.known.toLocaleString()} / ${p.to.toLocaleString()}</span></div>
+    <div class="goal" role="img" aria-label="${p.pct}% of the way to ${p.to} known words"><div style="width:${p.pct}%"></div></div>
+  </div>`;
+}
+
 const ROW = () => `milestone|${lang()}`; // synced, so a milestone is celebrated once, not per device
 
 // Celebrates a milestone the first time it's reached. The first check for a language only
