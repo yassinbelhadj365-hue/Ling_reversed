@@ -9,6 +9,9 @@ on:
   workflow_dispatch:
   push:
     tags: ['v*']
+    # Also check the build whenever the phone-app setup changes.
+    branches: [main]
+    paths: ['mobile/**', '.github/workflows/mobile.yml']
 
 permissions:
   contents: write
