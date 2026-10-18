@@ -3,6 +3,7 @@ import { htmlToText, youTubeId } from '../text.js';
 import { fetchYouTubeAudio, decodeAudio, transcribe, toVtt, progressText, AUDIO_ERRORS } from '../asr.js';
 import { prepare, createLesson, fetchTranscript as serverTranscript, serverCaps, canRelay, requestImport, cloudOutcome } from '../relay.js';
 import { NEW } from '../srs.js';
+import { parseShortcut, pickShortcutTrack, SHORTCUT_MARK } from '../youtube.js';
 
 const TEXT_FILE = /\.(txt|srt|vtt|md|html?)$/i;
 
@@ -59,6 +60,8 @@ export async function renderImport(view) {
       <p class="small">Only a <b>computer</b> running <b>Start Lingo Reader</b> can download from YouTube (YouTube refuses
         requests from other websites, and phones can’t run the helper). There are a few ways to import on your phone:</p>
       <ol class="small">
+        <li><b>iPhone:</b> set up the free <a href="https://github.com/yassinbelhadj365-hue/Ling_reversed/blob/main/docs/IPHONE_SHORTCUT.md" target="_blank" rel="noopener">Lingo transcript Shortcut</a>
+          once. Then share a video to it from the YouTube app, come back here and tap <b>📋 Paste</b>.</li>
         <li><b>The Lingo Reader phone app</b> (docs/MOBILE.md) downloads transcripts itself: paste a link and it just works.</li>
         <li><b>Cloud helper (no computer needed):</b> if you added the free <i>transcript</i> function to your sync
           server (docs/SYNC_SETUP.md), pasting a link works directly. YouTube sometimes refuses it; then the next option kicks in.</li>
@@ -80,6 +83,18 @@ export async function renderImport(view) {
   const status = (msg, html = false) => { $('#yt-status')[html ? 'innerHTML' : 'textContent'] = msg; };
   const trackLabel = (t) => `${t.name}${t.kind === 'auto' && !/auto/i.test(t.name) ? ' (auto-generated)' : ''}`;
   let fetchedFor = null;
+  let shortcut = null; // captions brought by the iPhone Shortcut (youtube.js parseShortcut)
+
+  // Text copied by the iPhone Shortcut: load it like a downloaded transcript.
+  function useShortcut(text) {
+    const s = parseShortcut(text);
+    if (!s) return false;
+    shortcut = s;
+    $('#yt').value = `https://www.youtube.com/watch?v=${s.videoId}`;
+    $('#text').value = '';
+    fetchTranscript();
+    return true;
+  }
   let noServer = false; // this device can't download from YouTube
 
   function explainNoServer() {
@@ -100,7 +115,9 @@ export async function renderImport(view) {
     if (!id) return status('That doesn’t look like a YouTube video link.'), false;
     status('Getting the transcript…');
     $('#yt-fetch').disabled = true;
-    const r = await serverTranscript(id, lang(), track);
+    const r = shortcut?.videoId === id
+      ? { ...pickShortcutTrack(shortcut, lang(), track), via: 'shortcut' }
+      : await serverTranscript(id, lang(), track);
     if (!$('#yt-fetch')) return false; // the import screen was left in the meantime
     $('#yt-fetch').disabled = false;
     if (!r) {
@@ -127,7 +144,7 @@ export async function renderImport(view) {
     aiMade = false;
     if (!$('#title').value.trim() && r.title) $('#title').value = r.title;
     fetchedFor = id;
-    status(`✓ Loaded “${trackLabel(r.track)}” captions${r.via === 'cloud' ? ' (through your cloud helper)' : ''}.${r.track.kind === 'auto' ? ' Auto-generated captions may contain mistakes.' : ''}`);
+    status(`✓ Loaded “${trackLabel(r.track)}” captions${r.via === 'cloud' ? ' (through your cloud helper)' : r.via === 'shortcut' ? ' (from the iPhone Shortcut)' : ''}.${r.track.kind === 'auto' ? ' Auto-generated captions may contain mistakes.' : ''}`);
     return true;
   }
 
@@ -185,12 +202,17 @@ export async function renderImport(view) {
     const f = $('#media').files[0];
     if (f) aiTranscribe(() => f.arrayBuffer());
   });
-  $('#text').addEventListener('input', (e) => { if (e.isTrusted) aiMade = false; });
+  $('#text').addEventListener('input', (e) => {
+    if (!e.isTrusted) return;
+    aiMade = false;
+    if ($('#text').value.trimStart().startsWith(SHORTCUT_MARK)) useShortcut($('#text').value);
+  });
 
   $('#paste').addEventListener('click', async () => {
     let clip = '';
     try { clip = await navigator.clipboard.readText(); } catch { /* permission refused or unsupported */ }
     if (!clip) return toast('Couldn’t read the clipboard — long-press the box and choose Paste.');
+    if (useShortcut(clip)) return;
     const id = youTubeId(clip.trim());
     if (id && clip.trim().split(/\s+/).length === 1) {
       $('#yt').value = clip.trim();
@@ -202,7 +224,7 @@ export async function renderImport(view) {
   });
 
   $('#yt-fetch').addEventListener('click', () => fetchTranscript());
-  $('#yt-track').addEventListener('change', (e) => { if (e.target.value !== '' && !noServer) fetchTranscript(e.target.value); });
+  $('#yt-track').addEventListener('change', (e) => { if (e.target.value !== '' && (!noServer || shortcut)) fetchTranscript(e.target.value); });
   $('#yt').addEventListener('input', () => {
     const id = youTubeId($('#yt').value.trim());
     if (id && id !== fetchedFor && !$('#text').value.trim()) fetchTranscript();

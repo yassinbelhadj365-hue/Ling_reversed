@@ -13,6 +13,7 @@ import * as db from '../js/db.js';
 import { parseJsonReply, listModels } from '../js/ai.js';
 import { compareLine, heardBetween } from '../js/check.js';
 import { excerptAround, buildPrompt } from '../js/explain.js';
+import { parseShortcut, pickShortcutTrack } from '../js/youtube.js';
 
 // A scriptable stand-in for the YouTube/media player (js/player.js test hook).
 function makeFakePlayer() {
@@ -133,6 +134,21 @@ try {
   ok(!(await db.exportAll()).data.kv.some((r) => r.key.startsWith('secret:')), 'backups never contain API keys');
   await db.del('kv', 'secret:test');
 
+  // ---- unit: the iPhone Shortcut's copied text (youtube.js) ----
+  const SC_VTT_ES = 'WEBVTT\n\n00:00:01.000 --> 00:00:03.000\nHola desde el iPhone.\n';
+  const SC_TEXT = `LINGO-YT\ndQw4w9WgXcQ\nUn vídeo\n=====TRACK\n{"baseUrl":"https://x","name":{"runs":[{"text":"English (auto-generated)"}]},"languageCode":"en","kind":"asr"}\n=====VTT\n` +
+    `WEBVTT\n\n00:00:01.000 --> 00:00:03.000\nHello.\n=====TRACK\n{"baseUrl":"https://y","name":{"simpleText":"Spanish (Latin America)"},"languageCode":"es-419"}\n=====VTT\n${SC_VTT_ES}`;
+  const sc = parseShortcut(SC_TEXT.replace(/\n/g, '\r\n'));
+  ok(sc?.videoId === 'dQw4w9WgXcQ' && sc.title === 'Un vídeo' && sc.tracks.map((t) => `${t.lang}/${t.kind}`).join() === 'en/auto,es-419/manual',
+    'parseShortcut reads the video, title and caption tracks (Windows or iPhone line endings) ' + JSON.stringify(sc?.tracks?.map((t) => t.lang)));
+  const scPick = pickShortcutTrack(sc, 'es');
+  ok(scPick.ok && scPick.track.lang === 'es-419' && scPick.vtt === SC_VTT_ES.trim() && scPick.tracks.length === 2 && !('vtt' in scPick.tracks[0]),
+    'pickShortcutTrack picks the Spanish track, like the server does');
+  ok(pickShortcutTrack(sc, 'fr').error === 'no-track' && pickShortcutTrack(parseShortcut('LINGO-YT\ndQw4w9WgXcQ\nT\n'), 'es').error === 'no-captions'
+    && parseShortcut('just some text') === null, 'Shortcut text: no track for the language, no captions, not Shortcut text');
+  ok(parseShortcut(`LINGO-YT\ndQw4w9WgXcQ\nT\n=====TRACK\nlanguageCode: es\nkind: asr\n=====VTT\n${SC_VTT_ES}`)?.tracks[0]?.kind === 'auto',
+    'Shortcut text: track details without quotes are read too');
+
   // ---- unit: transcript check (check.js) ----
   const cf = compareLine('Esta es la frase número 2 del vídeo largo.', 'Esta es la frase número dos del video largo', 'es');
   ok(cf.length === 1 && cf[0].said === 'vídeo' && cf[0].heard === 'video', 'compareLine: flags the word the audio says differently ' + JSON.stringify(cf));
@@ -208,6 +224,19 @@ try {
       : plain(term, sentence));
     return { model: 'test-model', result: r };
   };
+
+  // ---- the iPhone Shortcut: 📋 Paste loads the captions it copied ----
+  W().location.hash = '#/import';
+  await until(() => D().getElementById('paste'));
+  Object.defineProperty(W().navigator, 'clipboard', { value: { readText: async () => SC_TEXT }, configurable: true });
+  D().getElementById('paste').click();
+  await until(() => /^WEBVTT/.test(D().getElementById('text').value));
+  ok(D().getElementById('text').value === SC_VTT_ES.trim() && /v=dQw4w9WgXcQ/.test(D().getElementById('yt').value)
+    && D().getElementById('title').value === 'Un vídeo' && /iPhone Shortcut/.test(D().getElementById('yt-status').textContent),
+    'pasting the Shortcut’s text loads the Spanish captions, link and title: ' + D().getElementById('yt-status').textContent);
+  delete W().navigator.clipboard;
+  W().location.hash = '#/library';
+  await sleep(200);
 
   // ---- page mode: a timed transcript without media ----
   const preview = await importLesson('Prueba', `0:00\nHola a todos, bienvenidos al canal.\n0:04\nHoy vamos a hablar de comida.\n0:09\nLa comida española es muy rica.\n`);

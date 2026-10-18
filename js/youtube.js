@@ -83,3 +83,47 @@ export async function phoneTranscript(videoId, lang, track = '') {
     return { ok: false, error: 'network', title, tracks };
   }
 }
+
+// ---------- the iPhone Shortcut (docs/IPHONE_SHORTCUT.md) ----------
+// iPhones can't run the app above for free, but a Shortcut can download captions on the
+// phone. It copies this text, which the Import screen recognizes when pasted:
+//   LINGO-YT
+//   <video id>
+//   <title>
+//   =====TRACK
+//   <the caption track's details from YouTube, as the Shortcut prints them>
+//   =====VTT
+//   <the track's WebVTT>
+//   (=====TRACK … again for each track)
+export const SHORTCUT_MARK = 'LINGO-YT';
+
+// -> {videoId, title, tracks: [{index, lang, kind, name, vtt}]} | null
+export function parseShortcut(text) {
+  const clean = String(text || '').replace(/\r\n?/g, '\n').trimStart();
+  if (!clean.startsWith(SHORTCUT_MARK)) return null;
+  const [head, ...chunks] = clean.split(/^=====TRACK[ \t]*$/m);
+  const [, videoId = '', title = ''] = head.split('\n').map((l) => l.trim());
+  if (!/^[A-Za-z0-9_-]{11}$/.test(videoId)) return null;
+  // The details are JSON, but read them leniently: spaces, and quotes may be missing.
+  const field = (s, key) => new RegExp(`"?${key}"?\\s*[:=]\\s*"?([^"\\n,}]*)`).exec(s)?.[1].trim() || '';
+  const tracks = chunks.map((chunk) => {
+    const [info, vtt = ''] = chunk.split(/^=====VTT[ \t]*$/m);
+    const lang = field(info, 'languageCode');
+    return { lang, kind: field(info, 'kind') === 'asr' ? 'auto' : 'manual', name: field(info, 'simpleText') || field(info, 'text') || lang, vtt: vtt.trim() };
+  }).filter((t) => t.lang && t.vtt.includes('-->')).map((t, index) => ({ index, ...t }));
+  return { videoId, title, tracks };
+}
+
+// The same result shape as phoneTranscript, choosing the track like it does.
+export function pickShortcutTrack(s, lang, track = '') {
+  const tracks = s.tracks.map(({ vtt, ...t }) => t);
+  if (!tracks.length) return { ok: false, error: 'no-captions', title: s.title };
+  let pick = track !== '' && track != null ? s.tracks[Number(track)] : null;
+  if (!pick) {
+    const inLang = s.tracks.filter((t) => t.lang === lang || t.lang.startsWith(`${lang}-`));
+    pick = inLang.find((t) => t.kind === 'manual') || inLang[0];
+  }
+  if (!pick) return { ok: false, error: 'no-track', title: s.title, tracks };
+  const { vtt, ...info } = pick;
+  return { ok: true, title: s.title, track: info, tracks, vtt };
+}

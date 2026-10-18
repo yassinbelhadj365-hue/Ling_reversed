@@ -45,7 +45,12 @@ Then on GitHub: **Settings → Secrets and variables → Actions → New reposit
 Keep `lingo-release.pfx` and the password somewhere safe. A new key can't update an app signed with the old one.
 The first build signed with this key must replace the earlier debug build once (uninstall, install).
 
-## 3. iPhone (Sideloadly, free Apple ID)
+## 3. iPhone
+
+**Recommended: no app at all.** Open the website in Safari, Share → **Add to Home Screen**, and set up the free
+[Lingo transcript Shortcut](IPHONE_SHORTCUT.md) once, so the iPhone downloads YouTube transcripts itself. Nothing to sign or renew.
+
+### The real app instead (Sideloadly, free Apple ID)
 
 Apple only lets apps outside the App Store onto an iPhone when they are signed with an Apple ID.
 With a free Apple ID, the signature lasts **7 days** and at most 3 such apps can be installed.
