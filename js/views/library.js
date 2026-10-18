@@ -151,7 +151,7 @@ export async function renderLibrary(view) {
       <a class="card lesson-card" href="#/lesson/${l.id}">
         <h3 dir="auto">${esc(l.title)}</h3>
         <div class="row small muted">
-          <span class="badge">${l.youtubeId ? 'YouTube' : KIND[l.kind] || 'Text'}</span>
+          <span class="badge">${l.youtubeId ? 'YouTube' : l.story ? '✨ Story' : KIND[l.kind] || 'Text'}</span>
           <span class="level ${lvl.cls}" title="Share of this lesson’s words you already know">${lvl.label} · you know ${lvl.pct}%</span>
           <span>${l.wordCount.toLocaleString()} words</span>
           ${l.completed ? '<span class="badge">✓ Completed</span>' : l.page ? `<span class="badge">In progress</span>` : ''}
@@ -165,7 +165,7 @@ export async function renderLibrary(view) {
 
   const recap = await lastWeekCard();
   view.innerHTML = `
-    <div class="row spread"><h1>${esc(langName(lang()))} library</h1><a class="btn primary small" href="#/import">+ Import</a></div>
+    <div class="row spread"><h1>${esc(langName(lang()))} library</h1><div class="row"><a class="btn small" href="#/import/story" title="The AI writes a story at your level with your LingQs">✨ Story</a><a class="btn primary small" href="#/import">+ Import</a></div></div>
     ${jobs}
     ${continueCard(lessons)}
     ${recap}

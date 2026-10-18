@@ -18,6 +18,7 @@ import { parseShortcut, pickShortcutTrack } from '../js/youtube.js';
 import { lessonLevel, lessonProgress, continueCard } from '../js/views/library.js';
 import { milestoneFor, weekStart, recapOf, checkMilestone, milestoneProgress, milestoneBarHtml } from '../js/progress.js';
 import { parseStamp } from '../js/video-ai.js';
+import { levelOf, pickTargets } from '../js/story.js';
 import { requestBody, direct, _resetModels } from '../js/ai.js';
 
 // A scriptable stand-in for the YouTube/media player (js/player.js test hook).
@@ -198,6 +199,11 @@ try {
     && vb.contents[0].parts[1].text === 'u' && vb.generationConfig.mediaResolution === 'MEDIA_RESOLUTION_LOW'
     && !requestBody({ system: 's', user: 'u' }).generationConfig.mediaResolution, 'a video request sends the YouTube link and the part, at low resolution');
 
+  // ---- unit: stories (story.js) ----
+  ok(levelOf(100).cefr === 'A1' && levelOf(1500).cefr === 'B1' && levelOf(20000).cefr === 'C1', 'levelOf');
+  const sv = new Map([['a', { term: 'a', status: 1, createdAt: 1 }], ['b', { term: 'b', status: 4 }], ['c', { term: 'c', status: 5 }], ['d', { term: 'd', status: 0 }], ['e', { term: 'e', status: 2 }]]);
+  ok(pickTargets(sv, 2, () => 0.99).sort().join() === 'a,e' && pickTargets(sv, 9).length === 3, 'pickTargets: LingQs only, the weakest first');
+
   // ---- unit: milestones and the weekly recap (progress.js) ----
   ok(milestoneFor(99) === 0 && milestoneFor(100) === 100 && milestoneFor(999) === 500 && milestoneFor(12000) === 10000, 'milestoneFor');
   const mon = weekStart(new Date(2026, 9, 18, 15)); // Sunday 18 Oct 2026 → Monday 12 Oct
@@ -339,6 +345,7 @@ try {
   W().__lingoGemini = async (req) => {
     aiCalls.push(req);
     if (req.video) return { model: 'test-model', result: videoAnswer(req) };
+    if (req.schema?.properties?.paragraphs) return { model: 'test-model', result: { title: 'Una historia', paragraphs: ['El gato come comida.', 'Después duerme en la casa.'] } };
     if (!req.schema.properties.meaning_native) return { model: 'test-model', result: { translation: EN[req.user] || '[EN] ' + req.user } };
     const term = /Target: "(.*)"/.exec(req.user)?.[1] || /Passage: "(.*)"/s.exec(req.user)?.[1] || '';
     const sentence = /Sentence: (.*)\n/.exec(req.user)?.[1] || term;
@@ -767,6 +774,27 @@ try {
   const gLesson = await db.get('lessons', W().location.hash.split('/').pop());
   ok(gLesson.asr === true && gLesson.youtubeId === 'dQw4w9WgXcQ' && gLesson.segments.length >= 1, 'the lesson plays the video and remembers its transcript is by AI');
   videoAnswer = null;
+
+  // ---- a story written by the AI with the learner's LingQs (story.js) ----
+  W().fetch = realFetch;
+  const lingqsNow = [...(await db.byLang('words', 'es'))].filter((w) => w.status >= 1 && w.status <= 4).map((w) => w.term);
+  W().location.hash = '#/library';
+  await until(() => D().querySelector('a[href="#/import/story"]'));
+  D().querySelector('a[href="#/import/story"]').click();
+  await until(() => D().getElementById('story-go'));
+  D().getElementById('story-topic').value = 'un gato';
+  const storyCallsBefore = aiCalls.length;
+  D().getElementById('story-go').click();
+  await until(() => /^#\/lesson\//.test(W().location.hash) && /gato/.test(D().getElementById('reader')?.textContent || ''));
+  const storyReq = aiCalls.slice(storyCallsBefore).find((r) => r.schema?.properties?.paragraphs);
+  const storyLesson = await db.get('lessons', W().location.hash.split('/').pop());
+  ok(storyLesson.title === 'Una historia' && storyLesson.kind === 'text' && storyLesson.segments.length === 2 && storyLesson.story?.topic === 'un gato'
+    && /Topic: un gato/.test(storyReq.user) && storyReq.temperature > 0, 'the AI writes a story lesson about the chosen topic');
+  ok(lingqsNow.length && storyLesson.story.targets.length && storyLesson.story.targets.every((t) => lingqsNow.includes(t))
+    && storyLesson.story.targets.every((t) => storyReq.user.includes(t)), 'the story is asked to use the learner’s LingQs: ' + storyLesson.story.targets);
+  ok(D().querySelector('#reader .w[data-n="gato"]'), 'the story reads like any lesson (tappable words)');
+  W().fetch = async (url, ...rest) => String(url).startsWith('api/')
+    ? new Response('Not found', { status: 404, headers: { 'content-type': 'text/plain' } }) : realFetch(url, ...rest);
 
   // ---- on a phone (no transcript server), not signed in, no AI: explain what to do ----
   const savedGemini = W().__lingoGemini;

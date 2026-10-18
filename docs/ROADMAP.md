@@ -34,6 +34,10 @@ this file records where things stand, what the owner decided, and what's next.
   timed, punctuated transcript; the lesson plays the video as usual. Also used by "Transcribe
   the audio with AI" without a local server. Covered by smoke tests with a stubbed Gemini;
   **not yet tried with a real key** (quality, timestamp accuracy, speed, free-tier limits).
+- **Stories from your LingQs** (js/story.js, 2026-10-18): Library → ✨ Story (or the card on
+  Import). Gemini writes ~150/300/500 words at a level guessed from the known-word count, with
+  up to 8 of the weakest LingQs and the most common known words; it becomes a text lesson.
+  Not yet tried with a real key (level fit, whether it really uses the targets).
 - **The AI runs out less** (2026-10-18): each Gemini model has its own free limit, so when one
   is used up the next free Flash/Flash-Lite model answers (own key and shared function). The
   owner asked for this after their key ran out; other providers (Groq, Mistral) and rotating
@@ -59,11 +63,8 @@ this file records where things stand, what the owner decided, and what's next.
 Content at the right level that's easy to get is the main gap; the habit side is covered.
 Proposed order 1 → 2 → 3 (the owner said "continue the roadmap", so 1 was built first):
 
-1. ~~Gemini transcribes any YouTube link~~: done (see Done). Next is 2.
-2. **Lessons written from your own LingQs**: "write me a story at my level about [topic]".
-   Gemini writes ~150–300 words using mostly known words plus 5–10 LingQs being learned, at
-   the learner's level; becomes a normal lesson, so words get met again in new contexts
-   (review by reading). Read aloud with the browser's speechSynthesis.
+1. ~~Gemini transcribes any YouTube link~~: done (see Done).
+2. ~~Lessons written from your own LingQs~~: done (see Done).
 3. **Read-aloud for text lessons** with the spoken word highlighted (speechSynthesis
    `boundary` events), so any text becomes reading-while-listening.
 4. **Sentence mode** for beginners: one sentence at a time, large, replay audio, reveal the

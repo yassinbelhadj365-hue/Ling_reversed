@@ -4,7 +4,7 @@
 // own. Deploy it as a function named "ai" and add the secret GEMINI_API_KEY
 // (docs/SYNC_SETUP.md). Optional secret GEMINI_MODEL overrides the default model.
 //
-//   POST /functions/v1/ai  {system, user, schema?, model?, fast?, video?: {url, start?, end?}}
+//   POST /functions/v1/ai  {system, user, schema?, model?, fast?, temperature?, video?: {url, start?, end?}}
 //   -> {ok: true, text, model, video?: true} | {ok: false, status?, error}
 
 const DEFAULT_MODEL = Deno.env.get('GEMINI_MODEL') || 'gemini-2.5-flash';
@@ -71,7 +71,7 @@ Deno.serve(async (req) => {
   const key = Deno.env.get('GEMINI_API_KEY');
   if (!key) return reply({ ok: false, error: 'The shared AI key isn’t set up on the sync server yet (secret GEMINI_API_KEY).' });
 
-  let body: { system?: string; user?: string; schema?: unknown; model?: string; fast?: boolean;
+  let body: { system?: string; user?: string; schema?: unknown; model?: string; fast?: boolean; temperature?: number;
     video?: { url?: string; start?: number; end?: number } };
   try { body = await req.json(); } catch { return reply({ ok: false, error: 'Bad request' }); }
   const system = String(body.system || ''), user = String(body.user || '');
@@ -96,7 +96,7 @@ Deno.serve(async (req) => {
       systemInstruction: { parts: [{ text: system }] },
       contents: [{ role: 'user', parts: [...videoParts, { text: user }] }],
       generationConfig: {
-        temperature: 0, responseMimeType: 'application/json',
+        temperature: Math.min(1.5, Math.max(0, Number(body.temperature) || 0)), responseMimeType: 'application/json',
         ...(v ? { mediaResolution: 'MEDIA_RESOLUTION_LOW' } : {}),
         ...(body.schema ? { responseSchema: body.schema } : {}),
         ...(withThinking && thinkingFor(m) ? { thinkingConfig: thinkingFor(m) } : {}),

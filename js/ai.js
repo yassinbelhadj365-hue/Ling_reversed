@@ -112,13 +112,13 @@ export function videoPart(video) {
 }
 
 // The request body Gemini expects (supabase/functions/ai builds the same one).
-export function requestBody({ system, user, schema, fast = false, video = null }, model = '') {
+export function requestBody({ system, user, schema, fast = false, video = null, temperature = 0 }, model = '') {
   const thinking = fast && thinkingLight(model);
   return {
     systemInstruction: { parts: [{ text: system }] },
     contents: [{ role: 'user', parts: [...videoPart(video), { text: user }] }],
     generationConfig: {
-      temperature: 0, responseMimeType: 'application/json',
+      temperature, responseMimeType: 'application/json',
       // Low resolution: the sound is what matters, and it uses a third of the free quota.
       ...(video ? { mediaResolution: 'MEDIA_RESOLUTION_LOW' } : {}),
       ...(schema ? { responseSchema: schema } : {}),

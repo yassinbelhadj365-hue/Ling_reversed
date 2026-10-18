@@ -2,6 +2,7 @@ import { state, lang, langName, statusOf, esc, toast, plural } from '../state.js
 import { htmlToText, youTubeId, formatTime } from '../text.js';
 import { hasProvider } from '../ai.js';
 import { videoTranscript } from '../video-ai.js';
+import { writeStory } from '../story.js';
 import { fetchYouTubeAudio, decodeAudio, transcribe, toVtt, progressText, AUDIO_ERRORS } from '../asr.js';
 import { prepare, createLesson, fetchTranscript as serverTranscript, serverCaps, canRelay, requestImport, cloudOutcome } from '../relay.js';
 import { NEW } from '../srs.js';
@@ -18,7 +19,7 @@ function takeShared() {
   } catch { return null; }
 }
 
-export async function renderImport(view) {
+export async function renderImport(view, arg) {
   // One box for everything (a link, a transcript, any text) plus a file button; the rest
   // waits under "More options".
   view.innerHTML = `
@@ -86,9 +87,50 @@ export async function renderImport(view) {
       <p class="small muted">On Android, after installing the app you can also use <b>Share → Lingo Reader</b> from the YouTube app.</p>
         </details>
       </details>
+    </div>
+    <div class="card" id="story-card">
+      <h2 style="margin-top:0">✨ Or let the AI write a story for you</h2>
+      <p class="small muted">A short text at your level, made of words you know plus a few of the LingQs you’re learning,
+        so you meet them again in new sentences.</p>
+      <div class="field"><label for="story-topic">About</label>
+        <input id="story-topic" type="text" placeholder="Optional — football, a trip to Lyon, cooking, a mystery…"></div>
+      <div class="row">
+        <select id="story-length" aria-label="Length" style="width:auto">
+          <option value="short">Short (~150 words)</option>
+          <option value="medium" selected>Medium (~300 words)</option>
+          <option value="long">Long (~500 words)</option>
+        </select>
+        <button class="btn primary" id="story-go">Write it</button>
+      </div>
+      <p class="small muted" id="story-status" aria-live="polite"></p>
     </div>`;
 
   const $ = (s) => view.querySelector(s);
+
+  // ---------- a story written by the AI (story.js) ----------
+  if (arg === 'story') { $('#story-card').scrollIntoView(); $('#story-topic').focus(); }
+  $('#story-go').addEventListener('click', async () => {
+    const btn = $('#story-go'), say = (m, html = false) => { $('#story-status')[html ? 'innerHTML' : 'textContent'] = m; };
+    if (!(await hasProvider())) {
+      return say('No AI is set up yet: add a free Gemini key in <a href="#/settings">Settings</a>, or <a href="#/account">log in</a> to your account.', true);
+    }
+    btn.disabled = true;
+    say('Writing your story…');
+    try {
+      const s = await writeStory({ topic: $('#story-topic').value, length: $('#story-length').value });
+      const made = await createLesson({
+        raw: s.text, title: s.title, merge: false, source: 'story',
+        extra: { story: { topic: $('#story-topic').value.trim(), targets: s.targets } },
+      });
+      if (!made) throw new Error('The AI didn’t write anything. Try again.');
+      toast(s.targets.length ? `Your story practises ${plural(s.targets.length, 'LingQ')}` : 'Your story is ready', 4000);
+      location.hash = `#/lesson/${made.lesson.id}`;
+    } catch (err) {
+      if (!$('#story-go')) return;
+      say(err.message === 'no-provider' ? 'No AI is set up yet.' : err.message);
+      btn.disabled = false;
+    }
+  });
 
   // ---------- automatic YouTube transcripts (served by serve.ps1's /api/transcript) ----------
   const status = (msg, html = false) => { $('#yt-status')[html ? 'innerHTML' : 'textContent'] = msg; };

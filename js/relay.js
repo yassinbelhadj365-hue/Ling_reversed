@@ -35,7 +35,7 @@ export function firstLine(text) {
 }
 
 // -> {lesson, newWords} | null when the text has no words. Uses the current language.
-export async function createLesson({ raw, filename = '', title, merge, asr = false, source = '', youtubeId = null, media = null }) {
+export async function createLesson({ raw, filename = '', title, merge, asr = false, source = '', youtubeId = null, media = null, extra = {} }) {
   const p = prepare(raw, filename, merge);
   if (!p.total) return null;
   const lesson = {
@@ -43,7 +43,7 @@ export async function createLesson({ raw, filename = '', title, merge, asr = fal
     lang: lang(), title: title || firstLine(raw), kind: p.timed ? 'transcript' : 'text', asr,
     source, youtubeId,
     segments: p.segments, words: p.counts, wordCount: p.total,
-    createdAt: Date.now(), openedAt: 0, page: 0, completed: false,
+    createdAt: Date.now(), openedAt: 0, page: 0, completed: false, ...extra,
   };
   if (media) {
     lesson.hasMedia = true;
