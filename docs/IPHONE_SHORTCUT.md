@@ -15,25 +15,25 @@ No computer, no app to install, nothing to renew. Your iPhone downloads the capt
 Open the **Shortcuts** app → **+** (new shortcut). Name it **Lingo transcript** (tap the name at
 the top). Add the actions below in order, using the search box at the bottom to find each one.
 
-When a step says *(rename: X)*, long-press the result of that action in a later field, or use
-**Set Variable** as written. Values in `code` must be typed exactly.
+**Picking a variable** (the result of an earlier block): tap the field, tap **Select Variable**, and
+the blocks grey out. Under each one a small blue **bubble** appears, e.g. **( Matches )**. Tap the
+bubble, not the block. Values in `code` must be typed (or better, copied) exactly.
 
 ### 1. Receive the link
 
 1. Tap the **ⓘ** (or the arrow next to the name) → turn on **Show in Share Sheet**.
    The first action becomes *Receive **Any** input from **Share Sheet***. Tap **Any** and keep
    only **URLs** and **Text**. Set *If there's no input* to **Get Clipboard**.
-2. **Match Text**. Pattern:
-   `(?:v=|youtu\.be/|shorts/|embed/|live/)([A-Za-z0-9_-]{11})`
-   in **Shortcut Input**.
-3. **Get Group from Matched Text**: *Get **Group At Index** `1` in **Matches***.
-4. **Set Variable**: name `VideoID`, to **Text from Group** (the result of step 3).
-   (Optional: you can skip this and pick the **Group** variable wherever these steps say VideoID.)
+2. **Match Text**. Tap the blue pattern and replace it with:
+   `(?<=v=|youtu\.be/|shorts/|embed/|live/)[A-Za-z0-9_-]{11}`
+   in **Shortcut Input**. Its result, **Matches**, is the video ID. Below, "the **Matches** bubble" means this result.
+3. (Nothing else to add here.)
 
 ### 2. Ask YouTube for the captions
 
 5. **Text**: paste this, then replace the word `VIDEO` (keep the quotes around it) with the
-   **VideoID** variable, picked from the bar above the keyboard (it may be called **Group**):
+   **Matches** variable: put the cursor between the quotes, tap **Select Variable**, then tap the small
+   **( Matches )** bubble under the Match Text block (the blocks grey out; the bubbles are what you tap):
 
    ```
    {"context":{"client":{"clientName":"ANDROID","clientVersion":"20.10.38","androidSdkVersion":30,"hl":"en"}},"videoId":"VIDEO"}
@@ -75,7 +75,7 @@ When a step says *(rename: X)*, long-press the result of that action in a later 
 12. **Text** (four lines):
     ```
     LINGO-YT
-    [VideoID]
+    [Matches]
     [Title]
     [Combined Text]
     ```
