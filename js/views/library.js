@@ -1,7 +1,9 @@
 import * as db from '../db.js';
-import { lang, langName, statusOf, esc } from '../state.js';
+import { LANGS, lang, langName, statusOf, esc } from '../state.js';
 import { NEW, KNOWN, IGNORED, isLearning } from '../srs.js';
-import { myJobs, jobStatusText, cancelJob, retryJob } from '../relay.js';
+import { myJobs, jobStatusText, cancelJob, retryJob, createLesson } from '../relay.js';
+import { hasProvider } from '../ai.js';
+import { SAMPLES } from '../samples.js';
 
 const KIND = { transcript: 'Transcript', text: 'Text' };
 
@@ -65,15 +67,38 @@ export async function renderLibrary(view) {
     .sort((a, b) => (b.openedAt || b.createdAt) - (a.openedAt || a.createdAt));
 
   if (!lessons.length) {
+    const sample = SAMPLES[lang()];
+    const ai = await hasProvider();
     view.innerHTML = `
       <h1>${esc(langName(lang()))} library</h1>
       ${jobs}
-      <div class="empty card">
-        <p style="font-size:2rem;margin:0">📚</p>
-        <p>No lessons yet. Import a YouTube transcript, subtitles, an article, or any text you want to learn from.</p>
-        <a class="btn primary" href="#/import">Import content</a>
+      <div class="card welcome">
+        <h2>Welcome! Let’s start with something short.</h2>
+        <div class="field"><label for="w-lang">I’m learning</label>
+          <select id="w-lang" style="width:auto">${LANGS.map(([c, n]) => `<option value="${c}" ${c === lang() ? 'selected' : ''}>${n}</option>`).join('')}</select></div>
+        <ol class="steps">
+          <li><b>Read or watch</b> something you’re interested in.</li>
+          <li><b>Tap any word</b> you don’t know to see what it means in that sentence.</li>
+          <li><b>Watch your known words grow</b>, and review the ones you saved.</li>
+        </ol>
+        <div class="row">
+          ${sample ? `<button class="btn primary" id="sample">Try a 2-minute sample lesson</button>` : ''}
+          <a class="btn ${sample ? '' : 'primary'}" href="#/import">Import a YouTube video or text</a>
+        </div>
+        ${ai ? '' : `<p class="small muted">Tapping a word asks a free AI. To turn it on, <a href="#/account">log in to your account</a>
+          or add a free key in <a href="#/settings">Settings</a>.</p>`}
       </div>`;
     wireJobs(view, rerender);
+    view.querySelector('#w-lang').addEventListener('change', (e) => {
+      const top = document.getElementById('lang-select');
+      top.value = e.target.value;
+      top.dispatchEvent(new Event('change')); // the app switches language and shows this screen again
+    });
+    view.querySelector('#sample')?.addEventListener('click', async (e) => {
+      e.target.disabled = true;
+      const made = await createLesson({ raw: sample.text, title: sample.title, merge: false, source: 'sample' });
+      if (made) location.hash = `#/lesson/${made.lesson.id}`;
+    });
     return;
   }
 

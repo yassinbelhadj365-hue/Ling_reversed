@@ -373,3 +373,8 @@ tr:last-child td { border-bottom: 0; }
 .lesson-done .tiles { margin: 0 0 12px; grid-template-columns: repeat(3, 1fr); gap: 8px; }
 .lesson-done .tile { padding: 10px 6px; }
 .lesson-done .row.spread { text-align: left; }
+
+/* ---------- first-run welcome (library) ---------- */
+.welcome h2 { margin-top: 0; }
+.welcome .steps { padding-left: 20px; margin: 4px 0 14px; }
+.welcome .steps li { margin-bottom: 6px; }

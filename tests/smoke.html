@@ -228,6 +228,20 @@ try {
   sel.value = 'es'; sel.dispatchEvent(new Event('change'));
   await sleep(300);
 
+  // first run: the welcome card, choosing a language there, and a sample lesson (in Italian,
+  // so the Spanish counts below are unaffected)
+  await until(() => D().querySelector('#view .welcome'));
+  ok(D().querySelector('#view .welcome #sample') && D().querySelectorAll('#view .welcome .steps li').length === 3, 'empty library: a welcome with 3 steps and a sample lesson');
+  const wLang = D().getElementById('w-lang');
+  wLang.value = 'it'; wLang.dispatchEvent(new Event('change'));
+  await until(() => /Italian library/.test(D().querySelector('#view h1')?.textContent || '') && D().getElementById('lang-select').value === 'it');
+  ok(D().getElementById('lang-select').value === 'it', 'choosing a language on the welcome card switches the app');
+  D().getElementById('sample').click();
+  await until(() => W().location.hash.startsWith('#/lesson/') && D().querySelectorAll('#reader .w').length > 50);
+  ok(/Un sabato al mercato/.test(D().getElementById('view').textContent), 'the sample lesson opens, ready to read');
+  sel.value = 'es'; sel.dispatchEvent(new Event('change'));
+  await until(() => /Spanish library/.test(D().querySelector('#view h1')?.textContent || ''));
+
   async function importLesson(title, text, yt = '') {
     W().location.hash = '#/import';
     await until(() => D().getElementById('text'));
