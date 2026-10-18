@@ -18,8 +18,9 @@ export const SCHEMA = {
     translation: S, meaning_native: S, meaning_target: S, grammar: S,
     examples: LIST, examples_native: LIST,
     lemma: S, part_of_speech: S, multiword_unit: { type: 'STRING', nullable: true },
+    same_meaning_as: { type: 'INTEGER' },
   },
-  required: ['translation', 'meaning_native', 'meaning_target', 'grammar', 'examples', 'examples_native', 'lemma', 'part_of_speech', 'multiword_unit'],
+  required: ['translation', 'meaning_native', 'meaning_target', 'grammar', 'examples', 'examples_native', 'lemma', 'part_of_speech', 'multiword_unit', 'same_meaning_as'],
 };
 
 // The part of the transcript around the sentence, at most maxChars long.
@@ -31,10 +32,12 @@ export function excerptAround(transcript, sentence, maxChars) {
   return `${start > 0 ? '…' : ''}${transcript.slice(start, start + maxChars)}${start + maxChars < transcript.length ? '…' : ''}`;
 }
 
-// input: {kind: 'word' | 'passage', term, sentence, transcript}
+// input: {kind: 'word' | 'passage', term, sentence, transcript, senses?}
+// senses: meanings of the word the learner has already met elsewhere (state.recordSense).
 export function buildPrompt(input, { depth = 'quick' } = {}) {
   const L = langName(state.settings.lang), N = langName(state.settings.native);
   const nEx = depth === 'deep' ? 4 : 2;
+  const senses = input.kind === 'word' ? input.senses || [] : [];
   const what = input.kind === 'passage'
     ? `the selected passage. "translation": an accurate, natural ${N} translation of the passage. ` +
       `"meaning_native": what it means and implies, in ${N} (one or two sentences). ` +
@@ -54,6 +57,10 @@ export function buildPrompt(input, { depth = 'quick' } = {}) {
     `Keep "grammar" under ${depth === 'deep' ? 70 : 35} words. "lemma" and "part_of_speech" (in ${N}) refer to the target word ` +
     `(empty strings for a passage). "multiword_unit": the expression the word belongs to in this sentence ` +
     `(idiom, phrasal or separable verb, fixed phrase), written as it appears in the sentence, or null. ` +
+    `"same_meaning_as": ${senses.length
+      ? `the learner has already met this word with these meanings: ${senses.map((m, k) => `${k + 1}. "${m}"`).join(' ')}. ` +
+        'Give the number of the one that is the same meaning as here (the same sense, even if worded differently), or 0 if the meaning here is different. '
+      : '0. '}` +
     `Accuracy matters more than style: never guess a meaning that doesn't fit the sentence. ` +
     `${depth === 'deep' ? 'The learner already saw a short explanation and is still confused: be more thorough and mention common confusions. ' : ''}` +
     `Reply with JSON only.`;
@@ -69,7 +76,8 @@ export function buildPrompt(input, { depth = 'quick' } = {}) {
 // fresh: skip the cache (Settings' Test button).
 export async function explain(input, { depth = 'quick', fresh = false } = {}) {
   const { lang, native } = state.settings;
-  const cacheKey = `e|${depth}|${lang}|${native}|${input.kind}|${hash32(input.sentence || '')}|${input.term}`;
+  const senses = input.senses?.length ? `|${hash32(input.senses.join('|'))}` : '';
+  const cacheKey = `e|${depth}|${lang}|${native}|${input.kind}|${hash32(input.sentence || '')}|${input.term}${senses}`;
   const cached = !fresh && await db.get('dict', cacheKey);
   if (cached) return cached.value;
   const { result, model } = await geminiJson(buildPrompt(input, { depth }));

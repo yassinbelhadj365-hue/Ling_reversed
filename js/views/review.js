@@ -52,7 +52,8 @@ export async function renderReview(view) {
         ${w.context ? `<p class="ctx" dir="auto">${highlight(w.context, w.term)}</p>` : ''}
         ${shown
           ? `<div class="answer" dir="auto">${w.hint ? esc(w.hint) : '<span class="muted">No hint saved — tap the word in a lesson to add one.</span>'}</div>
-             ${w.contextTr ? `<p class="ctx small" dir="auto">${esc(w.contextTr)}</p>` : ''}`
+             ${w.contextTr ? `<p class="ctx small" dir="auto">${esc(w.contextTr)}</p>` : ''}
+             ${otherMeanings(w)}`
           : '<button class="btn primary" id="show">Show meaning (space)</button>'}
       </div>
       ${shown ? `
@@ -100,6 +101,13 @@ export async function renderReview(view) {
 
   start(dueNow());
   return () => document.removeEventListener('keydown', onKey);
+}
+
+// The card is about the meaning met most recently (its sentence and hint); the word's
+// earlier meanings are listed after the answer, so the two aren't confused.
+function otherMeanings(w) {
+  const others = (w.senses || []).filter((s) => s.context !== w.context).map((s) => s.meaning);
+  return others.length ? `<p class="small muted">Also met as: ${others.map((m) => `“${esc(m)}”`).join(', ')}</p>` : '';
 }
 
 function nextDue(words) {

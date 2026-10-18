@@ -265,6 +265,7 @@ body.listen-mode main { max-width: 1400px; }
 }
 .dict-line > .small { grid-column: 1 / -1; }
 .meaning-here { border-color: var(--accent); }
+.new-sense { margin: 0 0 8px; padding: 6px 10px; border-radius: 8px; background: var(--surface-2); border-left: 4px solid var(--w-1); }
 .explain { padding: 10px 12px; border-radius: 10px; border: 1px solid var(--accent); }
 .explain .ex-meaning { font-size: 1.02rem; margin: 0 0 6px; }
 .examples { margin: 4px 0 8px; padding-left: 18px; }

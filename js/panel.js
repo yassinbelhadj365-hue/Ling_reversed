@@ -3,7 +3,7 @@
 // One AI answer (explain.js, Gemini) gives the sentence's translation, what the word
 // means here and a short explanation in the language you're learning. Only the meaning
 // that fits this sentence is shown, never a list of other senses.
-import { state, lang, langName, getWord, setStatus, saveWord, undoAuto, speak, esc, toast, statusOf } from './state.js';
+import { state, lang, langName, getWord, setStatus, saveWord, undoAuto, recordSense, speak, esc, toast, statusOf } from './state.js';
 import { NEW, KNOWN, IGNORED, isLearning } from './srs.js';
 import { progress } from './knowledge.js';
 import { sentenceLinks } from './ai.js';
@@ -27,7 +27,7 @@ export function openPanel(term, {
 } = {}) {
   current = {
     term, mode, context, mark, around, flag, transcript, onFlag, onChange, onClose,
-    explain: null, deep: null, handoff: null,
+    explain: null, deep: null, handoff: null, newSense: null,
   };
   render();
   panel.hidden = false;
@@ -51,7 +51,9 @@ const N = () => langName(state.settings.native);
 // ---------- loading ----------
 
 function aiInput() {
-  return { kind: current.mode === 'selection' ? 'passage' : 'word', term: current.term, sentence: current.context, transcript: current.transcript };
+  if (current.mode === 'selection') return { kind: 'passage', term: current.term, sentence: current.context, transcript: current.transcript };
+  const senses = (getWord(current.term)?.senses || []).map((s) => s.meaning);
+  return { kind: 'word', term: current.term, sentence: current.context, transcript: current.transcript, senses };
 }
 
 // depth 'quick' fills the main answer; 'deep' is the "Still unclear?" answer.
@@ -71,10 +73,30 @@ async function loadExplain({ depth = 'quick', force = false } = {}) {
     me[slot] = err.message === 'no-provider' ? { state: 'none' } : { state: 'error', msg: err.message };
   }
   renderDynamic();
-  if (slot === 'explain') rememberContext();
+  if (slot === 'explain' && me[slot].state === 'done') await afterAnswer(me);
 }
 
 const answer = (slot = 'explain') => (current?.[slot]?.state === 'done' ? current[slot].result || {} : null);
+
+// After the answer: record the meaning (a meaning the learner hasn't met before makes the
+// word a LingQ again, state.recordSense) and keep the sentence for flashcards.
+async function afterAnswer(me) {
+  if (me.mode !== 'word') return;
+  const res = await recordSense(me.term, me.context, me.explain.result).catch(() => null);
+  if (res?.isNew) {
+    me.onChange?.(me.term);
+    if (stillOpen(me)) { me.newSense = res; render(); }
+    toast(`New meaning of “${me.term}”: it’s a LingQ again`, 6000, {
+      label: 'Undo',
+      onClick: async () => {
+        await res.undo();
+        me.onChange?.(me.term);
+        if (stillOpen(me)) { me.newSense = null; render(); }
+      },
+    });
+  }
+  await rememberContext();
+}
 
 // LingQs keep the sentence they were met in (and its translation) for flashcards.
 async function rememberContext() {
@@ -213,6 +235,8 @@ function answerHtml(x, slot) {
     ? `<div class="small muted" dir="auto">${esc(r.examples_native[k])}</div>` : ''}</li>`).join('');
   return `<div class="explain">
     ${r.translation && slot === 'explain' ? `<p class="ctx-tr" id="ctx-tr" dir="auto">${esc(r.translation)}</p>` : ''}
+    ${current.newSense && slot === 'explain' ? `<p class="new-sense small"><b>New meaning for you.</b> You met this word before as
+      ${current.newSense.before.map((m) => `“${esc(m)}”`).join(', ')}, so it’s a LingQ again, with its own flashcard for this meaning.</p>` : ''}
     ${r.meaning_native ? `<div class="dict-line meaning-here"><span class="small muted">${isWord ? 'Here it means' : `In ${esc(N())}`}</span>
       <div><b dir="auto">${esc(r.meaning_native)}</b>${r.part_of_speech ? ` <span class="small muted" dir="auto">${esc(r.part_of_speech)}</span>` : ''}</div>
       <button class="btn small" data-act="hint-native" data-slot="${slot}">Use as hint</button></div>` : ''}

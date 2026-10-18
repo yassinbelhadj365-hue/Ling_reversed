@@ -1,8 +1,8 @@
 // App-wide state: settings, the in-memory vocabulary of the current language,
 // activity tracking, text-to-speech and small DOM helpers.
 import * as db from './db.js';
-import { NEW, KNOWN, isLearning, freshSrs, grade } from './srs.js';
-import { onLookup, onPass, onManual, onReview, undoPatch } from './knowledge.js';
+import { NEW, KNOWN, IGNORED, isLearning, freshSrs, grade } from './srs.js';
+import { onLookup, onPass, onManual, onReview, undoPatch, evOf } from './knowledge.js';
 import { countWords } from './text.js';
 
 export const LANGS = [
@@ -185,6 +185,53 @@ export async function applyReview(w, g) {
   state.vocab.set(w.term, w);
   addDelta(total, { reviews: 1 });
   await commit([w], total);
+}
+
+// ---------- meanings (senses) ----------
+// A word keeps the meanings the learner has met, each with the sentence it came from
+// (the AI's "meaning here", read from that transcript). Meeting the word with a meaning
+// that isn't on the list makes it a fresh LingQ, even when it was known or pinned:
+// knowing one meaning of a word doesn't mean knowing the others.
+// r: an explain() answer for `term` in `sentence`.
+// -> null (nothing to record) | {isNew: false} (first meaning) | {isNew: true, before: [meaning], undo()}
+export async function recordSense(term, sentence, r) {
+  const w = getWord(term);
+  const meaning = String(r?.meaning_native || '').trim();
+  if (!w || !meaning || !sentence || w.status === IGNORED) return null;
+  const senses = w.senses || [];
+  if (senses.some((s) => s.context === sentence)) return null;
+  const same = Number(r.same_meaning_as) || 0;
+  if (senses.length && same >= 1 && same <= senses.length) return null;
+  const sense = { meaning, explain: String(r.meaning_target || ''), context: sentence, contextTr: String(r.translation || ''), at: Date.now() };
+  // The first meaning, or another one while the word is still new: just remember it.
+  if (!senses.length || w.status === NEW) {
+    w.senses = [...senses, sense];
+    if (!w.hint) w.hint = meaning;
+    await saveWord(w);
+    return { isNew: false };
+  }
+  const before = { status: w.status, srs: w.srs, lingqAt: w.lingqAt, hint: w.hint, context: w.context, contextTr: w.contextTr, ev: w.ev, senses };
+  w.senses = [...senses, sense];
+  Object.assign(w, { hint: meaning, context: sentence, contextTr: sense.contextTr });
+  const total = applyStatus(w, 1);
+  w.srs = freshSrs();
+  w.lingqAt = Date.now();
+  total.lingqs = 1; // a new meaning counts as a new LingQ
+  w.ev = { ...evOf(w), base: 1, since: 0, rev: 0, src: 'auto' };
+  w.updatedAt = Date.now();
+  state.vocab.set(term, w);
+  await commit([w], total);
+  return {
+    isNew: true,
+    before: senses.map((s) => s.meaning),
+    async undo() {
+      const back = applyStatus(w, before.status);
+      back.lingqs = (back.lingqs || 0) - 1;
+      Object.assign(w, before, { updatedAt: Date.now() });
+      state.vocab.set(term, w);
+      await commit([w], back);
+    },
+  };
 }
 
 export async function saveWord(w) {

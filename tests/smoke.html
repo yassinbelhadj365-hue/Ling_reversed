@@ -193,7 +193,7 @@ try {
   const aiCalls = [];
   const plain = (term, sentence) => ({
     translation: EN[sentence] || '[EN] ' + sentence, meaning_native: '[EN] ' + term, meaning_target: 'Explicación de ' + term + '.',
-    grammar: '', examples: [], examples_native: [], lemma: term, part_of_speech: '', multiword_unit: null,
+    grammar: '', examples: [], examples_native: [], lemma: term, part_of_speech: '', multiword_unit: null, same_meaning_as: 1,
   });
   let aiAnswer = null; // set by a test to answer differently
   W().__lingoGemini = async (req) => {
@@ -241,6 +241,31 @@ try {
   const hint = D().getElementById('hint');
   hint.value = 'food'; hint.dispatchEvent(new Event('change'));
   await sleep(200);
+  const appStateM = await W().eval("import('/js/state.js')");
+  const comidaW = () => appStateM.getWord('comida');
+  ok(comidaW().senses?.length === 1 && comidaW().senses[0].meaning === 'food' && comidaW().senses[0].context === 'Hoy vamos a hablar de comida.',
+    'the meaning met in this sentence is remembered: ' + JSON.stringify(comidaW().senses));
+
+  // the same word with a different meaning elsewhere becomes a LingQ again
+  D().querySelector('#word-panel [data-act="close"]').click();
+  let sensesSent = null;
+  aiAnswer = (req, term) => {
+    sensesSent = /already met this word with these meanings: (.*?)\. Give/.exec(req.system)?.[1];
+    return { ...plain(term, 'La comida española es muy rica.'), meaning_native: 'cuisine', same_meaning_as: 0 };
+  };
+  D().querySelector('#reader p[data-i="2"] .w[data-n="comida"]').click();
+  await until(() => D().querySelector('#word-panel .new-sense'));
+  ok(sensesSent === '1. "food"', 'the AI is told the meanings already met: ' + sensesSent);
+  ok(/before as\s*“food”/.test(D().querySelector('#word-panel .new-sense').textContent), 'the panel says it is a new meaning');
+  ok(comidaW().status === 1 && comidaW().senses.length === 2 && comidaW().hint === 'cuisine' && comidaW().context === 'La comida española es muy rica.',
+    'a new meaning makes the word a fresh LingQ 1 for that meaning');
+  ok([...D().querySelectorAll('#reader .w[data-n="comida"]')].every((s) => s.classList.contains('st-1')), 'the reader shows it as LingQ 1');
+  D().querySelector('#toast .toast-action').click();
+  await until(() => comidaW().status === 2);
+  ok(comidaW().status === 2 && comidaW().senses.length === 1 && comidaW().hint === 'food', 'Undo puts the word back as it was');
+  aiAnswer = null;
+  D().querySelector('#word-panel [data-act="close"]').click();
+  await sleep(100);
 
   // phrase selection: "muy rica"
   const muy = D().querySelector('#reader .w[data-n="muy"]');
