@@ -4,7 +4,7 @@
 // own. Deploy it as a function named "ai" and add the secret GEMINI_API_KEY
 // (docs/SYNC_SETUP.md). Optional secret GEMINI_MODEL overrides the default model.
 //
-//   POST /functions/v1/ai  {system, user, schema?, model?}
+//   POST /functions/v1/ai  {system, user, schema?, model?, fast?}
 //   -> {ok: true, text, model} | {ok: false, status?, error}
 
 const DEFAULT_MODEL = Deno.env.get('GEMINI_MODEL') || 'gemini-2.5-flash';
@@ -39,23 +39,37 @@ Deno.serve(async (req) => {
   const key = Deno.env.get('GEMINI_API_KEY');
   if (!key) return reply({ ok: false, error: 'The shared AI key isn’t set up on the sync server yet (secret GEMINI_API_KEY).' });
 
-  let body: { system?: string; user?: string; schema?: unknown; model?: string };
+  let body: { system?: string; user?: string; schema?: unknown; model?: string; fast?: boolean };
   try { body = await req.json(); } catch { return reply({ ok: false, error: 'Bad request' }); }
   const system = String(body.system || ''), user = String(body.user || '');
   if (!user || system.length + user.length > MAX_CHARS) return reply({ ok: false, error: 'Request too large' });
   const model = /^gemini-[\w.-]+$/.test(body.model || '') ? body.model! : DEFAULT_MODEL;
 
+  // Quick lookups skip the model's "thinking" step (same rule as js/ai.js thinkingOff).
+  const thinking = !body.fast ? null
+    : /^gemini-2\.5-/.test(model) ? (/pro/.test(model) ? null : { thinkingBudget: 0 })
+    : /^gemini-[3-9]/.test(model) ? { thinkingLevel: 'low' } : null;
+  const send = (withThinking: boolean) => fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
+    body: JSON.stringify({
+      systemInstruction: { parts: [{ text: system }] },
+      contents: [{ role: 'user', parts: [{ text: user }] }],
+      generationConfig: {
+        temperature: 0.2, responseMimeType: 'application/json',
+        ...(body.schema ? { responseSchema: body.schema } : {}),
+        ...(withThinking && thinking ? { thinkingConfig: thinking } : {}),
+      },
+    }),
+  });
+
   try {
-    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
-      body: JSON.stringify({
-        systemInstruction: { parts: [{ text: system }] },
-        contents: [{ role: 'user', parts: [{ text: user }] }],
-        generationConfig: { temperature: 0.2, responseMimeType: 'application/json', ...(body.schema ? { responseSchema: body.schema } : {}) },
-      }),
-    });
-    const data = await res.json().catch(() => ({}));
+    let res = await send(true);
+    let data = await res.json().catch(() => ({}));
+    if (res.status === 400 && thinking && /think/i.test(data?.error?.message || '')) {
+      res = await send(false);
+      data = await res.json().catch(() => ({}));
+    }
     if (!res.ok) return reply({ ok: false, status: res.status, error: data?.error?.message || res.statusText });
     const text = (data?.candidates?.[0]?.content?.parts || []).map((p: { text?: string }) => p.text || '').join('');
     return reply({ ok: true, text, model });

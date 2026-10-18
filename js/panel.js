@@ -3,7 +3,7 @@
 // One AI answer (explain.js, Gemini) gives the sentence's translation, what the word
 // means here and a short explanation in the language you're learning. Only the meaning
 // that fits this sentence is shown, never a list of other senses.
-import { state, lang, langName, getWord, setStatus, saveWord, undoAuto, recordSense, speak, esc, toast, statusOf } from './state.js';
+import { state, lang, getWord, setStatus, saveWord, undoAuto, recordSense, speak, esc, toast, statusOf } from './state.js';
 import { NEW, KNOWN, IGNORED, isLearning } from './srs.js';
 import { progress } from './knowledge.js';
 import { sentenceLinks } from './ai.js';
@@ -45,8 +45,6 @@ export function closePanel() {
 export const panelTerm = () => current?.term ?? null;
 
 const stillOpen = (snapshot) => current && current === snapshot;
-const L = () => langName(lang());
-const N = () => langName(state.settings.native);
 
 // ---------- loading ----------
 
@@ -110,26 +108,29 @@ async function rememberContext() {
 }
 
 // ---------- rendering ----------
+// Kept short on purpose: the meaning, the sentence with its translation, the levels.
+// Everything else waits under "More".
 
 function render() {
   const head = (title, cls = '') => `
-    <div class="row spread">
+    <div class="row spread panel-head">
       <h2 class="panel-word ${cls}" dir="auto">${esc(title)}</h2>
       <div class="row">
         <button class="btn small" data-act="speak" aria-label="Listen">🔊</button>
         <button class="btn small" data-act="close" aria-label="Close">✕</button>
       </div>
     </div>`;
-  const common = `
-    <div id="assist-area">${assistHtml()}</div>
-    ${current.onFlag ? `<p class="small"><button class="btn small" data-act="flag-wrong" title="Mark this as a transcript mistake">⚑ Flag as wrong in the transcript</button></p>` : ''}`;
+  const flagBtn = current.onFlag
+    ? '<button class="btn small" data-act="flag-wrong" title="Mark this as a transcript mistake">⚑ Wrong in the transcript</button>' : '';
 
   if (current.mode === 'selection') {
     panel.innerHTML = `${head('Selected text', 'small-title')}
-      <p class="ctx-sentence sel-text" dir="auto">${esc(current.context)}</p>
-      <div id="answer-area" class="area">${answerAreaHtml()}</div>
+      <div id="answer-area">${answerAreaHtml()}</div>
       ${chipsHtml()}
-      ${common}`;
+      <details class="more"><summary>More</summary>
+        <div id="assist-area">${assistHtml()}</div>
+        ${flagBtn ? `<div class="row">${flagBtn}</div>` : ''}
+      </details>`;
     return;
   }
 
@@ -140,27 +141,29 @@ function render() {
   const related = term.includes(' ')
     ? []
     : [...state.vocab.values()].filter((x) => x.isPhrase && isLearning(x.status) && x.term.split(' ').includes(term)).slice(0, 5);
-  // Meaning first: the sentence and the AI answer, then the levels.
   panel.innerHTML = `${head(term)}
     ${flagBoxHtml()}
-    ${sentenceHtml()}
-    <div id="answer-area" class="area">${answerAreaHtml()}</div>
-    <div class="muted small">${STATUS_LABEL[status]}${where}</div>
-    ${autoLine(w)}
+    <div id="answer-area">${answerAreaHtml()}</div>
     <div class="status-row" role="group" aria-label="Set status">
       ${[1, 2, 3, 4].map((s) => `<button data-s="${s}" class="${status === s ? 'on' : ''}" title="LingQ level ${s} (key ${s})">${s}</button>`).join('')}
       <button data-s="${KNOWN}" class="${status === KNOWN ? 'on' : ''}" title="Known (key K)">✓ Known</button>
     </div>
-    <div class="row">
-      <button class="btn small" data-s="${IGNORED}" title="Ignore — names, typos (key X)">${status === IGNORED ? 'Ignored' : 'Ignore'}</button>
-      ${status !== NEW ? `<button class="btn small" data-s="${NEW}">Reset to new</button>` : ''}
-    </div>
-    <div class="field" style="margin-top:12px">
-      <label for="hint">Your meaning / hint</label>
-      <textarea id="hint" rows="2" style="min-height:56px" placeholder="Write a meaning, or tap “Use as hint”">${esc(w?.hint || '')}</textarea>
-    </div>
-    ${related.length ? `<p class="small">In phrases: ${related.map((r) => `<button class="btn small" data-open="${esc(r.term)}">${esc(r.term)}</button>`).join(' ')}</p>` : ''}
-    ${common}`;
+    ${undoLine(w)}
+    <details class="more"><summary>More</summary>
+      <div class="muted small">${STATUS_LABEL[status]}${where}</div>
+      ${autoLine(w)}
+      <div class="field" style="margin-top:8px">
+        <label for="hint">Your note for flashcards</label>
+        <textarea id="hint" rows="2" style="min-height:48px" placeholder="Filled in with the meaning; change it if you like">${esc(w?.hint || '')}</textarea>
+      </div>
+      ${related.length ? `<p class="small">In phrases: ${related.map((r) => `<button class="btn small" data-open="${esc(r.term)}">${esc(r.term)}</button>`).join(' ')}</p>` : ''}
+      <div id="assist-area">${assistHtml()}</div>
+      <div class="row">
+        <button class="btn small" data-s="${IGNORED}" title="Ignore — names, typos (key X)">${status === IGNORED ? 'Ignored' : 'Ignore'}</button>
+        ${status !== NEW ? `<button class="btn small" data-s="${NEW}">Reset to new</button>` : ''}
+        ${flagBtn}
+      </div>
+    </details>`;
 }
 
 function renderDynamic() {
@@ -171,13 +174,13 @@ function renderDynamic() {
   }
 }
 
-function sentenceHtml() {
+function sentenceHtml(translation) {
   const { context, mark } = current;
-  if (!context) return '';
+  if (!context || current.mode === 'selection') return '';
   const body = mark
     ? `${esc(context.slice(0, mark[0]))}<mark>${esc(context.slice(mark[0], mark[1]))}</mark>${esc(context.slice(mark[1]))}`
     : esc(context);
-  return `<div class="ctx-block"><div class="small muted">In this sentence</div><p class="ctx-sentence" dir="auto">${body}</p></div>`;
+  return `<div class="ctx-block"><p class="ctx-sentence" dir="auto">${body}</p>${translation}</div>`;
 }
 
 // Selection mode: the words of the passage, coloured by status; tap one to open it.
@@ -205,6 +208,15 @@ function flagBoxHtml() {
     </div></div>`;
 }
 
+const canUndo = (w) => w?.ev?.prev && Date.now() - (w.ev.autoAt || 0) < UNDO_WINDOW;
+
+// Shown right under the levels only when an automatic change can be undone.
+function undoLine(w) {
+  if (!state.settings.autoStatus || !canUndo(w)) return '';
+  return `<div class="auto-line small"><span>Level set automatically</span>
+    <button class="btn small" data-act="undo" title="Undo the last automatic change">Undo</button></div>`;
+}
+
 function autoLine(w) {
   if (!w?.ev || !state.settings.autoStatus) return '';
   const parts = [w.ev.src === 'manual' ? 'Set by you' : 'Auto · from your reading'];
@@ -212,9 +224,7 @@ function autoLine(w) {
     const p = progress(w, state.settings.autoPace);
     parts.push(`${Math.min(p.done, p.total)} / ${p.total} encounters toward known`);
   }
-  const undo = w.ev.prev && Date.now() - (w.ev.autoAt || 0) < UNDO_WINDOW
-    ? `<button class="btn small" data-act="undo" title="Undo the last automatic change">Undo</button>` : '';
-  return `<div class="auto-line"><span>${parts.join(' · ')}</span>${undo}</div>`;
+  return `<div class="auto-line small muted"><span>${parts.join(' · ')}</span></div>`;
 }
 
 // The normalized phrase of the AI's multi-word expression, when it really is several words.
@@ -225,47 +235,56 @@ function expressionTerm(r) {
   return terms.length >= 2 && term !== current.term ? term : '';
 }
 
-// One AI answer: translation, meaning here (native), explanation in the target language, examples.
-function answerHtml(x, slot) {
-  const r = x.result || {};
-  const isWord = current.mode === 'word';
-  const lemma = isWord && r.lemma && r.lemma.toLocaleLowerCase() !== current.term.toLocaleLowerCase() ? r.lemma : '';
-  const expr = slot === 'explain' ? expressionTerm(r) : '';
-  const examples = (r.examples || []).map((e, k) => `<li dir="auto">${esc(e)}${r.examples_native?.[k]
-    ? `<div class="small muted" dir="auto">${esc(r.examples_native[k])}</div>` : ''}</li>`).join('');
-  return `<div class="explain">
-    ${r.translation && slot === 'explain' ? `<p class="ctx-tr" id="ctx-tr" dir="auto">${esc(r.translation)}</p>` : ''}
-    ${current.newSense && slot === 'explain' ? `<p class="new-sense small"><b>New meaning for you.</b> You met this word before as
-      ${current.newSense.before.map((m) => `“${esc(m)}”`).join(', ')}, so it’s a LingQ again, with its own flashcard for this meaning.</p>` : ''}
-    ${r.meaning_native ? `<div class="dict-line meaning-here"><span class="small muted">${isWord ? 'Here it means' : `In ${esc(N())}`}</span>
-      <div><b dir="auto">${esc(r.meaning_native)}</b>${r.part_of_speech ? ` <span class="small muted" dir="auto">${esc(r.part_of_speech)}</span>` : ''}</div>
-      <button class="btn small" data-act="hint-native" data-slot="${slot}">Use as hint</button></div>` : ''}
-    ${r.meaning_target ? `<div class="dict-line"><span class="small muted">In ${esc(L())}</span>
-      <div><span class="ex-meaning" dir="auto">${esc(r.meaning_target)}</span>
-        ${r.grammar ? `<div class="small" dir="auto">${esc(r.grammar)}</div>` : ''}</div>
-      <button class="btn small" data-act="hint-target" data-slot="${slot}">Use as hint</button></div>` : ''}
-    ${lemma ? `<p class="small">Form of <b dir="auto">${esc(lemma)}</b> <button class="btn small" data-open-lemma="${esc(lemma)}">Open “${esc(lemma)}”</button></p>` : ''}
-    ${expr ? `<p class="small">Part of the expression <b dir="auto">${esc(r.multiword_unit)}</b>
-      <button class="btn small" data-act="save-expr">Save as phrase</button></p>` : ''}
-    ${examples ? `<div class="small muted">Examples</div><ul class="examples">${examples}</ul>` : ''}
-    <div class="small muted">${esc(x.source || '')}</div>
-  </div>`;
-}
-
+// The quick answer: the meaning here, big; a short explanation in the target language;
+// the sentence with its translation; one-tap links to the dictionary form and expression.
 function answerAreaHtml() {
   const x = current.explain;
   if (!current.context) return '';
-  if (!x || x.state === 'loading') return '<p class="ctx-tr muted" id="ctx-tr">Translating…</p>';
-  if (x.state === 'idle') return '<button class="btn small" data-act="explain">Translate and explain</button>';
+  const isWord = current.mode === 'word';
+  if (!x || x.state === 'loading') {
+    return `<div class="meaning skeleton" aria-label="Loading"></div>${isWord ? '<div class="meaning-target skeleton short"></div>' : ''}
+      ${sentenceHtml('<p class="ctx-tr muted" id="ctx-tr">Translating…</p>')}`;
+  }
+  if (x.state === 'idle') return `<button class="btn primary" data-act="explain">Translate</button>${sentenceHtml('')}`;
   if (x.state === 'none') {
     return `<p class="small muted">No AI is set up yet. Log in to your account (top right), or add a free Gemini key in
-      Settings. Meanwhile: ${linksHtml()}</p>`;
+      Settings. Meanwhile: ${linksHtml()}</p>${sentenceHtml('')}`;
   }
   if (x.state === 'error') {
     return `<p class="small">${esc(x.msg)}</p><div class="row"><button class="btn small" data-act="explain">Try again</button>
-      <span class="small">${linksHtml()}</span></div>`;
+      <span class="small">${linksHtml()}</span></div>${sentenceHtml('')}`;
   }
-  return answerHtml(x, 'explain');
+  const r = x.result || {};
+  if (!isWord) {
+    return `<p class="meaning sel" dir="auto" id="ctx-tr">${esc(r.translation || '')}</p>
+      ${r.meaning_target ? `<p class="meaning-target" dir="auto">${esc(r.meaning_target)}</p>` : ''}`;
+  }
+  const lemma = r.lemma && r.lemma.toLocaleLowerCase() !== current.term.toLocaleLowerCase() ? r.lemma : '';
+  const expr = expressionTerm(r);
+  const links = [
+    lemma && `<button class="btn small" data-open-lemma="${esc(lemma)}" title="Open the dictionary form">→ ${esc(lemma)}</button>`,
+    expr && `<button class="btn small" data-act="save-expr" title="Save the expression as a phrase LingQ">+ Save phrase “${esc(r.multiword_unit)}”</button>`,
+  ].filter(Boolean).join('');
+  return `<p class="meaning meaning-here" dir="auto">${esc(r.meaning_native || '')}${r.part_of_speech
+      ? ` <span class="pos small muted" dir="auto">${esc(r.part_of_speech)}</span>` : ''}</p>
+    ${r.meaning_target ? `<p class="meaning-target" dir="auto">${esc(r.meaning_target)}</p>` : ''}
+    ${current.newSense ? `<p class="new-sense small"><b>New meaning for you</b> (before: ${current.newSense.before.map((m) => `“${esc(m)}”`).join(', ')}).
+      It’s a LingQ again for this meaning.</p>` : ''}
+    ${sentenceHtml(r.translation ? `<p class="ctx-tr" id="ctx-tr" dir="auto">${esc(r.translation)}</p>` : '')}
+    ${links ? `<div class="row answer-links">${links}</div>` : ''}`;
+}
+
+// "More detail": grammar and examples, from a longer look at the transcript.
+function detailHtml(x) {
+  const r = x.result || {};
+  const examples = (r.examples || []).map((e, k) => `<li dir="auto">${esc(e)}${r.examples_native?.[k]
+    ? `<div class="small muted" dir="auto">${esc(r.examples_native[k])}</div>` : ''}</li>`).join('');
+  return `<div class="explain">
+    ${r.meaning_target ? `<p class="ex-meaning" dir="auto">${esc(r.meaning_target)}</p>` : ''}
+    ${r.grammar ? `<p class="small" dir="auto">${esc(r.grammar)}</p>` : ''}
+    ${examples ? `<ul class="examples">${examples}</ul>` : ''}
+    <div class="small muted">${esc(x.source || '')}</div>
+  </div>`;
 }
 
 function linksHtml() {
@@ -276,10 +295,10 @@ function assistHtml() {
   if (!current.context) return '';
   const d = current.deep, h = current.handoff;
   let body = '';
-  if (d?.state === 'loading') body = '<p class="small muted">Asking for a longer answer (the AI reads the whole transcript)…</p>';
+  if (d?.state === 'loading') body = '<p class="small muted">Looking more closely (the AI reads more of the transcript)…</p>';
   else if (d?.state === 'error') body = `<p class="small">${esc(d.msg)}</p>`;
-  else if (d?.state === 'none') body = '<p class="small">Log in to your account or add a free Gemini key in Settings to ask in the app, or use DeepSeek / ChatGPT.</p>';
-  else if (d?.state === 'done') body = answerHtml(d, 'deep');
+  else if (d?.state === 'none') body = '<p class="small">Log in to your account or add a free Gemini key in Settings, or use DeepSeek / ChatGPT.</p>';
+  else if (d?.state === 'done') body = detailHtml(d);
   if (h) {
     body += h.site === 'DeepSeek'
       ? `<div class="handoff">${h.copied
@@ -291,15 +310,14 @@ function assistHtml() {
           <a class="btn small" href="https://chat.deepseek.com/" target="_blank" rel="noopener">Open DeepSeek ↗</a></div></div>`
       : `<p class="small handoff">Opened a private ChatGPT chat with your question${h.copied ? ' (also copied — press Ctrl+V if the box is empty)' : ''}.</p>`;
   }
-  return `<details class="assist" ${d || h ? 'open' : ''}>
-      <summary class="small"><b>Still unclear?</b> Get a longer answer (reads the whole transcript)</summary>
-      <div class="row" style="margin:8px 0">
-        <button class="btn small" data-act="deep" title="The same free AI, with more detail">Ask in the app</button>
+  return `<div class="assist">
+      <div class="row">
+        <button class="btn small" data-act="deep" title="Grammar and examples, with more of the transcript">More detail</button>
         <button class="btn small" data-act="deepseek" title="Copies the question (with the transcript) and opens DeepSeek’s free chat">DeepSeek ↗</button>
         <button class="btn small" data-act="chatgpt" title="Opens a private ChatGPT chat with the question (uses your own account)">ChatGPT ↗</button>
       </div>
       ${body}
-    </details>`;
+    </div>`;
 }
 
 // ---------- actions ----------
@@ -378,7 +396,6 @@ panel.addEventListener('click', (e) => {
   const t = e.target.closest('button');
   if (!t) return;
   const act = t.dataset.act;
-  const slotAnswer = () => current[t.dataset.slot]?.result;
   if (act === 'close') return closePanel();
   if (act === 'speak') return speak(current.mode === 'selection' ? current.context : current.term);
   if (act === 'undo') return undo();
@@ -389,8 +406,6 @@ panel.addEventListener('click', (e) => {
   if (act === 'flag-edit') { const f = current.flag; closePanel(); return f.edit(); }
   if (act === 'explain') return loadExplain({ force: true });
   if (act === 'deep') return loadExplain({ depth: 'deep' });
-  if (act === 'hint-target') return saveHint(slotAnswer()?.meaning_target || '');
-  if (act === 'hint-native') return saveHint(slotAnswer()?.meaning_native || '');
   if (act === 'chatgpt') return handoff('ChatGPT');
   if (act === 'deepseek') return handoff('DeepSeek');
   if (act === 'copy-again') return copyText(current.handoff.text).then((ok) => toast(ok ? 'Copied' : 'Copying was blocked — select the text and copy it'));

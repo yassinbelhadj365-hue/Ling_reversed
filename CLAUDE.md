@@ -36,7 +36,7 @@ The machine has no Node, Python, or git — tooling is PowerShell + Edge.
 
 **State (`js/state.js`) is the single gateway for word changes.** `state.vocab` is an in-memory `Map(term → word record)` for the **current language only**; it is reloaded by `loadVocab()` when the language changes. Always mutate words through `setStatus` / `setStatusMany` / `saveWord` / `markSeen` / `addLessonToPool` / `removeLessonFromPool` so the map, IndexedDB, and the per-day activity counters (`bumpActivity`) stay consistent. Writing to the `words` store directly desyncs the map and the stats.
 
-**Word status model** (constants in `js/srs.js`): `0` new (blue), `1–4` LingQ levels (yellow), `5` known, `-1` ignored. Entering 1–4 from outside that range resets `srs` and counts as a LingQ created; reaching 5 counts as a word learned.
+**Word status model** (constants in `js/srs.js`): `0` new (blue), `1–4` LingQ levels (yellow), `5` known, `-1` ignored. Entering 1–4 from outside that range resets `srs` and counts as a LingQ created; reaching 5 counts as a word learned. **Meanings:** `word.senses[{meaning, explain, context, contextTr, at}]` lists the meanings met (from the AI). The AI gets them and returns `same_meaning_as`; a meaning not on the list makes the word a fresh LingQ 1 (even if known or pinned), counted as a new LingQ, with Undo (`state.recordSense`).
 
 **Automatic levels** (`js/knowledge.js`, pure functions plus a `RULES` table with cited thresholds). Statuses are computed from evidence stored on `word.ev`: a lookup (a reader tap) makes or demotes a LingQ; untapped read/listen passes count as clean encounters, at most 3 per day; flashcard review is the third input. The reader reports evidence through `state.applyEvents(events)`, which returns `[{term, from, to}]`. User choices go through `setStatus(..., {manual: true})`; a manual Known or Ignored is pinned. Each automatic change keeps a one-level undo in `ev.prev` (`state.undoAuto`). When `settings.autoStatus` is off, the old `pagingKnown` behaviour applies. Docs/PLAN.md has the full design and the remaining commits (C2–C9). Phrases are ordinary word records whose `term` is space-joined normalized tokens (`isPhrase: true`); the reader finds them by matching token sequences within a paragraph.
 
@@ -76,10 +76,10 @@ Local audio/video blobs live in the `media` store, keyed by `lessonId`, and are 
 - Tests stub every AI call with `window.__lingoGemini(req) → {result, model}`, plus `__lingoASR`.
 
 **Panel** (`js/panel.js`) has two modes: `word` (a word or a phrase of up to 10 words) and `selection` (a longer passage or several lines, also opened by the 💬 line button).
-- Order: the sentence, then one AI answer (`#answer-area`: the sentence translation, "Here it means" in the native language, a short target-language explanation, examples, a lemma button and a "Save as phrase" button driven by `multiword_unit`), then levels and hint, then "Still unclear?".
+- Kept short so a lookup is quick: the meaning here (large), a one-line target-language explanation, the sentence with its translation, buttons for the lemma and the expression (`multiword_unit`), then the levels. Everything else (hint, progress, "More detail" with grammar and examples, ChatGPT/DeepSeek, Ignore, flagging) is inside a closed `details.more`. The hint fills itself with the meaning (`recordSense`).
 
 **AI explanations** (`js/explain.js`): `explain(input, {depth, fresh})` with `input = {kind: 'word' | 'passage', term, sentence, transcript}` makes one `geminiJson` call and returns `{result: {translation, meaning_native, meaning_target, grammar, examples, examples_native, lemma, part_of_speech, multiword_unit}, source}`, cached in `dict` under `e|depth|…`.
-- `quick` sends about 4k characters of transcript around the sentence; `deep` ("Still unclear?") up to 30k.
+- `quick` (every tap) asks only for the short fields (`QUICK_SCHEMA`), sends about 3k characters of transcript and sets `fast`, which turns off the model's thinking (`ai.thinkingOff`; retried without it if a model refuses). `deep` ("More detail") adds grammar and examples and sends up to 30k.
 - `js/assist.js` only holds the hand-offs:
   - ChatGPT: `chatgpt.com/?temporary-chat=true&q=`, a private chat.
   - DeepSeek: the question is copied, because the site can't be prefilled.

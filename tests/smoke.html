@@ -150,7 +150,9 @@ try {
   const exc = excerptAround(longT, 'Línea 1500.', 300);
   ok(exc.length <= 302 && exc.includes('Línea 1500.'), 'excerptAround keeps the part of the transcript around the sentence');
   const bp = buildPrompt({ kind: 'word', term: 'casa', sentence: 'Mi casa es tu casa.', transcript: 'Hola. Mi casa es tu casa. Adiós.' });
-  ok(/simple Spanish/.test(bp.system) && /examples/.test(bp.system) && bp.user.includes('Hola. Mi casa'), 'buildPrompt: Spanish first, examples, transcript included');
+  ok(/simple Spanish/.test(bp.system) && !/"examples"/.test(bp.system) && bp.user.includes('Hola. Mi casa') && bp.fast, 'buildPrompt: quick = short Spanish explanation, no examples, transcript included');
+  const bd = buildPrompt({ kind: 'word', term: 'casa', sentence: 'Mi casa es tu casa.', transcript: '' }, { depth: 'deep' });
+  ok(/"examples"/.test(bd.system) && bd.schema.properties.examples && !bd.fast, 'buildPrompt: “More detail” asks for grammar and examples');
 
   // ---- unit: timeline (sync.js) ----
   const tl = buildTimeline([{ text: 'a b', start: 0 }, { text: 'c d', start: 4 }, { text: 'e f', start: 9 }]);
@@ -223,11 +225,12 @@ try {
   ok(D().querySelector('.panel-word').textContent === 'comida', 'panel opened for word');
   await until(() => D().querySelector('#reader .w[data-n="comida"]').classList.contains('st-1'));
   ok([...D().querySelectorAll('#reader .w[data-n="comida"]')].every((s) => s.classList.contains('st-1')), 'tapping a word made it LingQ 1 automatically');
-  ok(/Auto/.test(D().querySelector('#word-panel .auto-line')?.textContent || ''), 'panel shows the automatic-level line');
+  ok(/Auto/.test(D().querySelector('#word-panel .more .auto-line')?.textContent || ''), 'the automatic-level details are under More');
+  ok(D().querySelector('#word-panel > details.more:not([open])') && D().querySelector('#word-panel .more #hint'), 'the panel is short: hint and extras wait under a closed “More”');
   ok(D().querySelector('#word-panel .ctx-sentence mark')?.textContent === 'comida', 'panel marks the tapped word in its sentence');
   await until(() => /food/.test(D().querySelector('#word-panel .meaning-here')?.textContent || ''));
   ok(/^Today we're going to talk about food./.test(D().querySelector('#word-panel .ctx-tr')?.textContent || ''), 'panel shows the AI translation of the exact sentence: ' + D().querySelector('#word-panel .ctx-tr')?.textContent);
-  ok(/Here it means\s*food/.test(D().querySelector('#word-panel .meaning-here').textContent), 'one meaning: the one that fits this sentence');
+  ok(/^food/.test(D().querySelector('#word-panel .meaning-here').textContent.trim()), 'one meaning, shown first: the one that fits this sentence');
   ok(/Lo que se come/.test(D().querySelector('#word-panel #answer-area').textContent), 'a short explanation in Spanish');
   ok(!D().querySelector('#word-panel .defs, #word-panel .mono, #word-panel #dict-more'), 'no list of other dictionary senses');
   ok(D().querySelector('#word-panel [data-act="save-expr"]') && /de comida/.test(D().querySelector('#word-panel #answer-area').textContent), 'the expression the AI found can be saved as a phrase');
@@ -256,7 +259,7 @@ try {
   D().querySelector('#reader p[data-i="2"] .w[data-n="comida"]').click();
   await until(() => D().querySelector('#word-panel .new-sense'));
   ok(sensesSent === '1. "food"', 'the AI is told the meanings already met: ' + sensesSent);
-  ok(/before as\s*“food”/.test(D().querySelector('#word-panel .new-sense').textContent), 'the panel says it is a new meaning');
+  ok(/before: “food”/.test(D().querySelector('#word-panel .new-sense').textContent), 'the panel says it is a new meaning');
   ok(comidaW().status === 1 && comidaW().senses.length === 2 && comidaW().hint === 'cuisine' && comidaW().context === 'La comida española es muy rica.',
     'a new meaning makes the word a fresh LingQ 1 for that meaning');
   ok([...D().querySelectorAll('#reader .w[data-n="comida"]')].every((s) => s.classList.contains('st-1')), 'the reader shows it as LingQ 1');
@@ -373,14 +376,14 @@ try {
     examples: ['Esta casa es grande.', 'Esta mañana llovió.'], examples_native: ['This house is big.', 'This morning it rained.'],
     lemma: 'este', part_of_speech: 'determiner', multiword_unit: null,
   });
-  aiAnswer = (req) => { aiReq = req; return answer(/still confused/.test(req.system) ? 'Explicación más detallada.' : 'Señala la frase de la que se habla.'); };
+  aiAnswer = (req) => { aiReq = req; return answer(req.schema.properties.examples ? 'Explicación más detallada.' : 'Señala la frase de la que se habla.'); };
   D().querySelector('#reader p[data-i="25"] .w').click();
   await until(() => !D().getElementById('word-panel').hidden);
   ok(!fake.playing, 'tapping a word pauses the video');
   await until(() => /Señala la frase/.test(D().querySelector('#answer-area')?.textContent || ''));
   const ex = D().querySelector('#answer-area');
-  ok(/Esta casa es grande/.test(ex.textContent) && /This house is big/.test(ex.textContent), 'explanation and examples in Spanish, each example with its English translation');
-  ok(/This is sentence 25/.test(ex.textContent) && /Here it means\s*this/.test(ex.textContent), 'the translation and the meaning here come from the same answer');
+  ok(/This is sentence 25/.test(ex.textContent) && /^this/.test(ex.querySelector('.meaning-here').textContent.trim()), 'the translation and the meaning here come from the same answer');
+  ok(!aiReq.schema.properties.examples && aiReq.fast, 'the tap asks only for the short answer, without thinking time (quick)');
   ok(aiReq.user.includes(`Sentence: `) && aiReq.user.includes(lines[3]) && aiReq.user.includes(lines[38]),
     'the AI gets the sentence and the transcript');
   ok(D().querySelector('#answer-area [data-open-lemma="este"]'), 'the dictionary form can be opened');
@@ -389,10 +392,12 @@ try {
   const opened = [];
   const realOpen = W().open;
   W().open = (url) => { opened.push(url); return null; };
-  D().querySelector('#word-panel details.assist summary').click();
+  D().querySelector('#word-panel details.more summary').click();
   D().querySelector('#word-panel [data-act="deep"]').click();
   await until(() => /Explicación más detallada/.test(D().querySelector('#assist-area')?.textContent || ''));
   ok(/test-model/.test(D().querySelector('#assist-area').textContent), 'the longer answer is shown in the panel');
+  ok(/Esta casa es grande/.test(D().querySelector('#assist-area').textContent) && /This house is big/.test(D().querySelector('#assist-area').textContent),
+    '“More detail” adds Spanish examples, each with its English translation');
   ok(aiReq.user.includes(lines[3]) && /examples/.test(aiReq.system) && /simple Spanish/.test(aiReq.system),
     'the deeper question includes the transcript and asks for Spanish explanations with examples');
   D().querySelector('#word-panel [data-act="chatgpt"]').click();

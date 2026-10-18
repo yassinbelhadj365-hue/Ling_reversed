@@ -71,28 +71,47 @@ export function parseJsonReply(text) {
   return JSON.parse(clean.slice(start, end + 1));
 }
 
+// Quick lookups skip the model's "thinking" step, which can take seconds.
+// Gemini 2.5 takes a thinking budget, later models a thinking level.
+export function thinkingOff(model) {
+  if (/^gemini-2\.5-/.test(model)) return /pro/.test(model) ? null : { thinkingBudget: 0 };
+  if (/^gemini-[3-9]/.test(model)) return { thinkingLevel: 'low' };
+  return null;
+}
+
 // The request body Gemini expects (supabase/functions/ai builds the same one).
-export function requestBody({ system, user, schema }) {
+export function requestBody({ system, user, schema, fast = false }, model = '') {
+  const thinking = fast && thinkingOff(model);
   return {
     systemInstruction: { parts: [{ text: system }] },
     contents: [{ role: 'user', parts: [{ text: user }] }],
-    generationConfig: { temperature: 0.2, responseMimeType: 'application/json', ...(schema ? { responseSchema: schema } : {}) },
+    generationConfig: {
+      temperature: 0.2, responseMimeType: 'application/json',
+      ...(schema ? { responseSchema: schema } : {}),
+      ...(thinking ? { thinkingConfig: thinking } : {}),
+    },
   };
 }
 
 async function direct(key, req) {
   const model = await pickModel(key);
-  let res;
+  const send = (body) => fetch(`${API}/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(key)}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  let res, data;
   try {
-    res = await fetch(`${API}/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(key)}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(requestBody(req)),
-    });
+    res = await send(requestBody(req, model));
+    data = await res.json().catch(() => ({}));
+    // A model that doesn't accept the thinking setting: ask again without it.
+    if (res.status === 400 && req.fast && /think/i.test(data.error?.message || '')) {
+      res = await send(requestBody({ ...req, fast: false }, model));
+      data = await res.json().catch(() => ({}));
+    }
   } catch {
     throw new Error('Couldn’t reach the AI (offline?).');
   }
-  const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(errorText(res.status, data.error?.message));
   const text = (data.candidates?.[0]?.content?.parts || []).map((p) => p.text || '').join('');
   return { result: parseJsonReply(text), model };
@@ -142,6 +161,7 @@ export async function translateSentence(text, from, to) {
       system: `Translate the user's ${langName(from)} text into natural ${langName(to)}. Keep the meaning and tone; don't explain. Reply with JSON: {"translation": ""}`,
       user: text,
       schema: LINE_SCHEMA,
+      fast: true,
     });
     result = { text: String(r.translation || '').trim(), source: sourceLabel(model) };
   } catch (err) {
