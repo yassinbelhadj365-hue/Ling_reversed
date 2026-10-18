@@ -1,9 +1,28 @@
 import * as db from '../db.js';
 import { lang, langName, statusOf, esc } from '../state.js';
-import { NEW, KNOWN, isLearning } from '../srs.js';
+import { NEW, KNOWN, IGNORED, isLearning } from '../srs.js';
 import { myJobs, jobStatusText, cancelJob, retryJob } from '../relay.js';
 
 const KIND = { transcript: 'Transcript', text: 'Text' };
+
+// How much of a lesson you can follow: the share of its running words you know (counted
+// by occurrence, names and other ignored words left out). Research on reading finds
+// comprehension rises steadily with this number, and about 95–98% feels comfortable,
+// so it's shown as a label rather than used to block anything.
+// -> {pct, label, cls}
+export function lessonLevel(words, status = statusOf) {
+  let known = 0, all = 0;
+  for (const [term, n] of Object.entries(words || {})) {
+    const s = status(term);
+    if (s === IGNORED) continue;
+    all += n;
+    if (s === KNOWN) known += n;
+  }
+  const pct = all ? Math.floor((known / all) * 100) : 0;
+  if (pct >= 95) return { pct, label: 'Easy', cls: 'easy' };
+  if (pct >= 85) return { pct, label: 'Good level', cls: 'good' };
+  return { pct, label: 'Challenging', cls: 'hard' };
+}
 
 // Imports this phone asked the computer to do.
 async function jobsHtml() {
@@ -69,18 +88,20 @@ export async function renderLibrary(view) {
       else if (s === KNOWN) known++;
     }
     const pct = (n) => Math.round((n / total) * 100);
+    const lvl = lessonLevel(l.words);
     return `
       <a class="card lesson-card" href="#/lesson/${l.id}">
         <h3 dir="auto">${esc(l.title)}</h3>
         <div class="row small muted">
           <span class="badge">${l.youtubeId ? 'YouTube' : KIND[l.kind] || 'Text'}</span>
+          <span class="level ${lvl.cls}" title="Share of this lesson’s words you already know">${lvl.label} · you know ${lvl.pct}%</span>
           <span>${l.wordCount.toLocaleString()} words</span>
           ${l.completed ? '<span class="badge">✓ Completed</span>' : l.page ? `<span class="badge">In progress</span>` : ''}
         </div>
         <div class="meter" role="img" aria-label="${pct(known)}% known, ${pct(learning)}% LingQs, ${pct(fresh)}% new">
           <div style="width:${pct(known)}%"></div><div class="l" style="width:${pct(learning)}%"></div>
         </div>
-        <div class="small muted">${pct(fresh)}% new words · ${learning} LingQs · ${terms.length.toLocaleString()} unique</div>
+        <div class="small muted">${fresh.toLocaleString()} new words · ${learning} LingQs · ${terms.length.toLocaleString()} different words</div>
       </a>`;
   }).join('');
 
