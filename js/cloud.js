@@ -276,9 +276,9 @@ export async function fetchLessonMedia(lessonId) {
   }
 }
 
-// Call one of the sync server's Edge Functions (e.g. "transcript").
+// Call one of the sync server's Edge Functions (e.g. "transcript"); with `body`, a JSON POST.
 // -> parsed JSON | null when the function isn't deployed or can't be reached.
-export async function callFunction(name, params) {
+export async function callFunction(name, params, { body } = {}) {
   const cfg = cloudConfig();
   if (!cfg) return null;
   const acc = activeAccount();
@@ -286,7 +286,8 @@ export async function callFunction(name, params) {
   if (acc && isSignedIn(acc)) token = await accessToken(acc).catch(() => cfg.anonKey);
   try {
     const res = await fetch(`${cfg.url}/functions/v1/${name}?${new URLSearchParams(params)}`, {
-      headers: { apikey: cfg.anonKey, Authorization: `Bearer ${token}` },
+      headers: { apikey: cfg.anonKey, Authorization: `Bearer ${token}`, ...(body ? { 'Content-Type': 'application/json' } : {}) },
+      ...(body ? { method: 'POST', body: JSON.stringify(body) } : {}),
     });
     if (!res.ok || !res.headers.get('content-type')?.includes('json')) return null;
     return await res.json();

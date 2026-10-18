@@ -5,14 +5,12 @@
 <iframe id="app" src="../index.html#/library" style="width:1000px;height:800px"></iframe>
 <script type="module">
 import { tokenize, parseAny, mergeCues, youTubeId, parseSubtitles, sentenceAt, hash32 } from '../js/text.js';
-import { chunkForMyMemory, pickMyMemory, rankByContext } from '../js/translate.js';
-import { parseDefinition, parseMonolingual } from '../js/dict.js';
 import { expressionCandidates } from '../js/text.js';
 import { grade, freshSrs } from '../js/srs.js';
 import { onLookup, onPass, onManual, onReview, undoPatch, computeStatus } from '../js/knowledge.js';
 import { buildTimeline, activeIndex, charAt } from '../js/sync.js';
 import * as db from '../js/db.js';
-import { parseJsonReply, listModels } from '../js/assist.js';
+import { parseJsonReply, listModels } from '../js/ai.js';
 import { compareLine, heardBetween } from '../js/check.js';
 import { excerptAround, buildPrompt } from '../js/explain.js';
 
@@ -115,44 +113,22 @@ try {
   const sa = sentenceAt(para, para.indexOf('la casa'));
   ok(para.slice(sa.start, sa.start + 6) === 'Compré', 'sentenceAt: start offset points at the sentence');
   ok(sentenceAt('sin puntuación aquí nada', 5).sentence === 'sin puntuación aquí nada', 'sentenceAt: no punctuation → whole text');
-  const long = 'palabra '.repeat(120);
-  const chunks = chunkForMyMemory(long, 100);
-  ok(chunks.every((c) => new TextEncoder().encode(c).length <= 100) && chunks.join(' ').split(/\s+/).length === 120, 'chunkForMyMemory: byte limit, no split words');
   ok(hash32('hola') === hash32('hola') && hash32('hola') !== hash32('Hola'), 'hash32 stable and case-sensitive');
-  const mm = { responseData: { translatedText: "- Today we're going to talk about" }, matches: [
-    { segment: 'Hoy vamos a hablar de', translation: "- Today we're going to talk about", 'created-by': 'MateCat' },
-    { segment: 'Hoy vamos a hablar de comida.', translation: "Today we're going to talk about food.", 'created-by': 'MT!' },
-  ] };
-  ok(pickMyMemory(mm, 'Hoy vamos a hablar de comida.') === "Today we're going to talk about food.", 'MyMemory: fuzzy match for another sentence loses to the machine translation');
-  const rk = rankByContext([{ source: 'MyMemory', text: 'meal' }, { source: 'MyMemory', text: 'food' }], 'Today we will talk about food.', 'en');
-  ok(rk[0].text === 'food' && rk[0].fits && !rk[1].fits, 'rankByContext: the candidate found in the sentence translation ranks first');
-  ok(rankByContext([{ source: 'Wiktionary', text: 'to speak, talk' }], 'They talked all night', 'en')[0].fits, 'rankByContext: stem match (talk ~ talked)');
-  const formHtml = '<span class="form-of-definition"><a title="Appendix:Glossary">first-person</a> plural of <span class="form-of-definition-link"><i><a title="hablar">hablar</a></i></span></span>';
-  const fd = parseDefinition(formHtml, 'Verb');
-  ok(fd.formOf === 'hablar' && /plural of hablar/.test(fd.text), 'parseDefinition: inflected form → lemma');
-  const frHtml = `<div class="mw-parser-output">
-    <div class="mw-heading mw-heading3"><h3>Forme de verbe</h3></div>
-    <ol><li><i>Première personne du pluriel du présent de</i> <a title="avoir">avoir</a>.
-      <ul><li><span class="example"><q>Nous <b>avons</b> faim.</q> <span class="sources">— (Auteur, 2020)</span></span></li></ul></li></ol>
-    <div class="mw-heading mw-heading3"><h3>Nom commun</h3></div>
-    <ol><li>Bâtiment servant de logis.<sup class="reference">[1]</sup></li><li>Famille.</li></ol></div>`;
-  const mono = parseMonolingual(frHtml);
-  ok(mono.length === 2 && mono[0].pos === 'Forme de verbe' && mono[0].defs[0].formOf === 'avoir' && mono[0].defs[0].example === 'Nous avons faim.'
-    && mono[1].defs.map((x) => x.text).join('|') === 'Bâtiment servant de logis.|Famille.', 'parseMonolingual: French Wiktionary definitions, examples, forms ' + JSON.stringify(mono));
   const ec = expressionCandidates('Lo hizo a pesar de todo.', 'Lo hizo a pesar de todo.'.indexOf('pesar'), 'es');
   ok(ec[0].surface === 'hizo a pesar' && ec.some((c) => c.surface === 'a pesar de') && ec.length === 5, 'expressionCandidates: 3- and 2-word runs around the word');
 
-  // ---- unit: "still unclear" helpers ----
-  ok(parseJsonReply('<think>hmm {no}</think>Sure!\n```json\n{"gloss_in_context":"here"}\n```').gloss_in_context === 'here', 'parseJsonReply: strips reasoning and fences');
+  // ---- unit: AI helpers (ai.js) ----
+  ok(parseJsonReply('Sure!\n```json\n{"translation":"here"}\n```').translation === 'here', 'parseJsonReply: strips fences');
   const realFetchU = window.fetch;
-  window.fetch = async () => new Response(JSON.stringify({ data: [
-    { id: 'deepseek/deepseek-v4-pro', pricing: { prompt: '0.0000006', completion: '0.000002' } },
-    { id: 'google/gemma-4-31b-it:free', pricing: { prompt: '0', completion: '0' } },
-    { id: 'nvidia/nemotron-3-ultra-550b-a55b:free', pricing: { prompt: '0', completion: '0' } },
+  window.fetch = async () => new Response(JSON.stringify({ models: [
+    { name: 'models/gemini-2.0-flash', displayName: 'Gemini 2.0 Flash', supportedGenerationMethods: ['generateContent'] },
+    { name: 'models/gemini-2.5-flash-lite', displayName: 'Gemini 2.5 Flash-Lite', supportedGenerationMethods: ['generateContent'] },
+    { name: 'models/text-embedding-004', supportedGenerationMethods: ['embedContent'] },
+    { name: 'models/gemini-2.5-flash', displayName: 'Gemini 2.5 Flash', supportedGenerationMethods: ['generateContent'] },
   ] }));
-  const models = await listModels();
+  const models = await listModels('k');
   window.fetch = realFetchU;
-  ok(models.map((m) => m.id).join() === 'nvidia/nemotron-3-ultra-550b-a55b:free,google/gemma-4-31b-it:free', 'only free models are offered (paid DeepSeek excluded), strongest first');
+  ok(models.map((m) => m.id).join() === 'gemini-2.5-flash,gemini-2.5-flash-lite,gemini-2.0-flash', 'Gemini models: newest stable Flash first, no embedding models ' + models.map((m) => m.id));
   await db.setSetting('secret:test', 'sk-123');
   ok(!(await db.exportAll()).data.kv.some((r) => r.key.startsWith('secret:')), 'backups never contain API keys');
   await db.del('kv', 'secret:test');
@@ -213,15 +189,23 @@ try {
   const fake = makeFakePlayer();
   W().__lingoFakePlayer = fake.factory;
   const EN = { 'Hoy vamos a hablar de comida.': "Today we're going to talk about food." };
-  W().__lingoTranslate = async (text) => ({ text: EN[text] || '[EN] ' + text, source: 'Test' });
-  W().__lingoDict = async (term) => term === 'comida'
-    ? [{ source: 'MyMemory', pos: 'translation', text: 'meal' }, { source: 'MyMemory', pos: 'translation', text: 'food' }]
-    : [];
-  W().__lingoMono = async (term) => term === 'comida'
-    ? { source: 'es.wiktionary.org', url: 'https://es.wiktionary.org/wiki/comida', entries: [{ pos: 'Sustantivo femenino', defs: [
-        { text: 'Conjunto de alimentos que se toman en una ocasión.', example: 'La comida está lista.', formOf: '' }] }] }
-    : null;
-  W().__lingoExpr = async (surface) => surface === 'de comida' ? [{ source: 'Wiktionary', pos: 'Phrase', text: '(test) about food' }] : [];
+  // One fake Gemini (ai.js test hook): line translations, and word/passage answers.
+  const aiCalls = [];
+  const plain = (term, sentence) => ({
+    translation: EN[sentence] || '[EN] ' + sentence, meaning_native: '[EN] ' + term, meaning_target: 'Explicación de ' + term + '.',
+    grammar: '', examples: [], examples_native: [], lemma: term, part_of_speech: '', multiword_unit: null,
+  });
+  let aiAnswer = null; // set by a test to answer differently
+  W().__lingoGemini = async (req) => {
+    aiCalls.push(req);
+    if (!req.schema.properties.meaning_native) return { model: 'test-model', result: { translation: EN[req.user] || '[EN] ' + req.user } };
+    const term = /Target: "(.*)"/.exec(req.user)?.[1] || /Passage: "(.*)"/s.exec(req.user)?.[1] || '';
+    const sentence = /Sentence: (.*)\n/.exec(req.user)?.[1] || term;
+    const r = aiAnswer?.(req, term) || (term === 'comida'
+      ? { ...plain(term, sentence), meaning_native: 'food', meaning_target: 'Lo que se come.', part_of_speech: 'noun', multiword_unit: 'de comida' }
+      : plain(term, sentence));
+    return { model: 'test-model', result: r };
+  };
 
   // ---- page mode: a timed transcript without media ----
   const preview = await importLesson('Prueba', `0:00\nHola a todos, bienvenidos al canal.\n0:04\nHoy vamos a hablar de comida.\n0:09\nLa comida española es muy rica.\n`);
@@ -241,21 +225,13 @@ try {
   ok([...D().querySelectorAll('#reader .w[data-n="comida"]')].every((s) => s.classList.contains('st-1')), 'tapping a word made it LingQ 1 automatically');
   ok(/Auto/.test(D().querySelector('#word-panel .auto-line')?.textContent || ''), 'panel shows the automatic-level line');
   ok(D().querySelector('#word-panel .ctx-sentence mark')?.textContent === 'comida', 'panel marks the tapped word in its sentence');
-  const areas = [...D().querySelectorAll('#word-panel .area')].map((a) => a.id);
-  ok(areas.join() === 'explain-area,english-area' && D().querySelector('#word-panel #english-area .ctx-tr') && !D().querySelector('#word-panel [data-act="toggle-english"]'),
-    'Spanish explanation first, then English, shown right away (no button): ' + areas);
-  await until(() => D().querySelector('#word-panel .mono'));
-  const ea = D().querySelector('#word-panel #explain-area');
-  ok(/Conjunto de alimentos/.test(ea.textContent) && /La comida está lista/.test(ea.textContent),
-    'the target-language dictionary (Wiktionary in Spanish) is shown first, with an example');
-  ok(/add a free OpenRouter key/.test(ea.textContent), 'no AI available → suggests how to get a sentence-specific explanation');
-  await until(() => /^Today/.test(D().querySelector('#word-panel .ctx-tr')?.textContent || ''));
-  ok(/^Today we're going to talk about food\./.test(D().querySelector('#word-panel .ctx-tr')?.textContent || ''), 'panel translates the exact sentence: ' + D().querySelector('#word-panel .ctx-tr')?.textContent);
-  await until(() => D().querySelector('#word-panel .meaning-here'));
-  ok(/food/.test(D().querySelector('#word-panel .meaning-here')?.textContent || ''), '"Meaning here" picks the dictionary sense that fits the sentence (food, not meal)');
-  ok(D().querySelector('#word-panel .ctx-tr mark')?.textContent === 'food', 'the matching word is highlighted in the translation');
-  await until(() => /de comida/.test(D().querySelector('#word-panel #english-area')?.textContent || ''));
-  ok(/Expression\s*de comida/.test(D().querySelector('#word-panel #english-area').textContent.replace(/\s+/g, ' ')), 'an expression around the word is detected');
+  await until(() => /food/.test(D().querySelector('#word-panel .meaning-here')?.textContent || ''));
+  ok(/^Today we're going to talk about food./.test(D().querySelector('#word-panel .ctx-tr')?.textContent || ''), 'panel shows the AI translation of the exact sentence: ' + D().querySelector('#word-panel .ctx-tr')?.textContent);
+  ok(/Here it means\s*food/.test(D().querySelector('#word-panel .meaning-here').textContent), 'one meaning: the one that fits this sentence');
+  ok(/Lo que se come/.test(D().querySelector('#word-panel #answer-area').textContent), 'a short explanation in Spanish');
+  ok(!D().querySelector('#word-panel .defs, #word-panel .mono, #word-panel #dict-more'), 'no list of other dictionary senses');
+  ok(D().querySelector('#word-panel [data-act="save-expr"]') && /de comida/.test(D().querySelector('#word-panel #answer-area').textContent), 'the expression the AI found can be saved as a phrase');
+  ok(aiCalls.filter((c) => /Target: "comida"/.test(c.user)).length === 1, 'one AI request for the tap');
   D().querySelector('#reader .tr-btn[data-tr="2"]').click();
   await until(() => /^\[EN\] La comida/.test(D().querySelector('#reader p[data-i="2"] .tr')?.textContent || ''));
   ok(/^\[EN\] La comida/.test(D().querySelector('#reader p[data-i="2"] .tr')?.textContent || ''), 'line translation button shows the line in English');
@@ -365,35 +341,34 @@ try {
   await until(() => inBand(25));
   ok(inBand(25) && D().getElementById('follow-btn').hidden, '"Follow video" jumps back to the spoken line');
 
-  // explanation in the target language first, English on a button; the AI sees the transcript
-  let aiInput = null;
+  // one AI answer for the tap; the AI sees the transcript around the sentence
+  let aiReq = null;
   const answer = (meaning) => ({
-    target: { meaning, grammar: 'Es un demostrativo femenino.', examples: ['Esta casa es grande.', 'Esta mañana llovió.'] },
-    native: { meaning: 'this', grammar: 'Feminine demonstrative.', translation: 'This is sentence 25.', examples: ['This house is big.', 'This morning it rained.'] },
-    lemma: 'este', part_of_speech: 'determinante', multiword_unit: null,
+    translation: 'This is sentence 25.', meaning_native: 'this', meaning_target: meaning, grammar: 'Es un demostrativo femenino.',
+    examples: ['Esta casa es grande.', 'Esta mañana llovió.'], examples_native: ['This house is big.', 'This morning it rained.'],
+    lemma: 'este', part_of_speech: 'determiner', multiword_unit: null,
   });
-  W().__lingoAI = async (input) => { aiInput = input; return answer('Señala la frase de la que se habla.'); };
+  aiAnswer = (req) => { aiReq = req; return answer(/still confused/.test(req.system) ? 'Explicación más detallada.' : 'Señala la frase de la que se habla.'); };
   D().querySelector('#reader p[data-i="25"] .w').click();
   await until(() => !D().getElementById('word-panel').hidden);
   ok(!fake.playing, 'tapping a word pauses the video');
-  await until(() => /Señala la frase/.test(D().querySelector('#explain-area')?.textContent || ''));
-  const ex = D().querySelector('#explain-area');
+  await until(() => /Señala la frase/.test(D().querySelector('#answer-area')?.textContent || ''));
+  const ex = D().querySelector('#answer-area');
   ok(/Esta casa es grande/.test(ex.textContent) && /This house is big/.test(ex.textContent), 'explanation and examples in Spanish, each example with its English translation');
-  ok(aiInput?.kind === 'word' && aiInput.sentence === lines[25] && aiInput.transcript.includes(lines[3]) && aiInput.transcript.includes(lines[38]),
-    'the AI gets the sentence and the whole transcript');
-  ok(/Feminine demonstrative/.test(D().querySelector('#english-area').textContent), 'the English explanation is shown too');
+  ok(/This is sentence 25/.test(ex.textContent) && /Here it means\s*this/.test(ex.textContent), 'the translation and the meaning here come from the same answer');
+  ok(aiReq.user.includes(`Sentence: `) && aiReq.user.includes(lines[3]) && aiReq.user.includes(lines[38]),
+    'the AI gets the sentence and the transcript');
+  ok(D().querySelector('#answer-area [data-open-lemma="este"]'), 'the dictionary form can be opened');
 
-  // "Still unclear?": a stronger free model reads the transcript; DeepSeek / ChatGPT hand-offs
-  let deepPrompt = null;
-  W().__lingoAssist = async (p) => { deepPrompt = p; return { model: 'test/free-model:free', result: answer('Explicación más detallada.') }; };
+  // "Still unclear?": a longer answer from the same AI; DeepSeek / ChatGPT hand-offs
   const opened = [];
   const realOpen = W().open;
   W().open = (url) => { opened.push(url); return null; };
   D().querySelector('#word-panel details.assist summary').click();
   D().querySelector('#word-panel [data-act="deep"]').click();
   await until(() => /Explicación más detallada/.test(D().querySelector('#assist-area')?.textContent || ''));
-  ok(/free-model/.test(D().querySelector('#assist-area').textContent), 'stronger free model answer shown in the panel');
-  ok(deepPrompt.user.includes(lines[3]) && /examples/.test(deepPrompt.system) && /simple Spanish/.test(deepPrompt.system),
+  ok(/test-model/.test(D().querySelector('#assist-area').textContent), 'the longer answer is shown in the panel');
+  ok(aiReq.user.includes(lines[3]) && /examples/.test(aiReq.system) && /simple Spanish/.test(aiReq.system),
     'the deeper question includes the transcript and asks for Spanish explanations with examples');
   D().querySelector('#word-panel [data-act="chatgpt"]').click();
   await until(() => opened.length === 1);
@@ -405,21 +380,19 @@ try {
   ok(opened[1] === 'https://chat.deepseek.com/' && /Copy|copied/.test(D().querySelector('#assist-area .handoff').textContent),
     'DeepSeek: the question is copied (or shown to copy) with paste instructions');
   W().open = realOpen;
-  delete W().__lingoAssist;
-  delete W().__lingoAI;
   D().querySelector('#word-panel [data-act="close"]').click();
   ok(fake.playing, 'closing the panel resumes it');
 
   // explain a whole line (sentence mode)
-  W().__lingoAI = async (input) => { aiInput = input; return answer('Es la frase número treinta.'); };
+  aiAnswer = (req) => { aiReq = req; return answer('Es la frase número treinta.'); };
   D().querySelector('#reader [data-explain="30"]').click();
-  await until(() => /número treinta/.test(D().querySelector('#explain-area')?.textContent || ''));
-  ok(aiInput.kind === 'passage' && aiInput.term === lines[30] && D().querySelectorAll('#word-panel .chip').length >= 6,
+  await until(() => /número treinta/.test(D().querySelector('#answer-area')?.textContent || ''));
+  ok(aiReq.user.includes(`Passage: "${lines[30]}"`) && D().querySelectorAll('#word-panel .chip').length >= 6,
     'the 💬 button explains the whole line, with its words as chips');
   D().querySelector('#word-panel .chip[data-word="frase"]').click();
   await until(() => D().querySelector('#word-panel .panel-word')?.textContent === 'frase');
   ok(D().querySelector('#word-panel .ctx-sentence mark')?.textContent === 'frase', 'tapping a chip opens that word in its sentence');
-  delete W().__lingoAI;
+  aiAnswer = null;
   D().querySelector('#word-panel [data-act="close"]').click();
 
   fake.set(101, false);
@@ -777,14 +750,15 @@ try {
   for (const [k, v] of Object.entries(savedLs)) v === null ? localStorage.removeItem(k) : localStorage.setItem(k, v);
   for (const n of [`${acc.id}-A`, `${acc.id}-B`, `${acc2.id}-A`]) indexedDB.deleteDatabase(`lingo-reader-${n}`);
 
-  // setting: English first
+  // setting: don't ask the AI automatically (saves the daily limit)
   const appState = await W().eval("import('/js/state.js')");
   const appPanel = await W().eval("import('/js/panel.js')");
-  appState.state.settings.firstLang = 'native';
+  appState.state.settings.aiAuto = false;
+  const callsBefore = aiCalls.length;
   appPanel.openPanel('casa', { context: 'Esta casa es grande.' });
-  ok([...D().querySelectorAll('#word-panel .area')].map((a) => a.id).join() === 'english-area,explain-area', 'with “English first” the translation comes before the Spanish explanation');
+  ok(D().querySelector('#word-panel [data-act="explain"]') && aiCalls.length === callsBefore, 'with automatic answers off, the panel waits for the button');
   appPanel.closePanel();
-  appState.state.settings.firstLang = 'target';
+  appState.state.settings.aiAuto = true;
 
   ok(!D().body.dataset.error, 'no runtime errors: ' + (D().body.dataset.error || 'none'));
 } catch (e) {

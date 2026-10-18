@@ -51,11 +51,10 @@ You can always set a level yourself; Known and Ignore stay as you set them. Ever
 - **Keys:** `Space` play/pause, `←`/`→` previous/next line, `R` replay.
 - **Fixes and options:** a timing offset corrects transcripts that drift, and the "Translate the current line" option shows each spoken line's translation.
 
-**Translations in context:** tapping a word shows the exact sentence it's in and its translation.
-- **Free translation:** on-device in Chrome or Edge when the language pack is installed; otherwise MyMemory.
-- **"Meaning here":** the dictionary sense that fits the sentence.
-- **Grammar:** word forms (*vamos* = form of *ir*) and expressions (*a pesar de*).
-- **Chrome extra:** in Chrome on a computer, an on-device AI (Gemini Nano) explanation with a grammar note.
+**One AI answer per tap:** tapping a word shows the exact sentence it's in and one answer from Google Gemini (free tier), which reads the transcript around it:
+- **The translation** of the sentence, and **what the word means here**. You only see the meaning that fits; there's no list of other senses.
+- **A short explanation** in the language you're learning, with example sentences, the word's dictionary form, and any expression it belongs to (*a pesar de*), which you can save as a phrase.
+- **Setup:** none when you're logged in to an account whose sync server has the shared key ([docs/SYNC_SETUP.md](docs/SYNC_SETUP.md)). Otherwise, or for your own daily limit, add a free key from [aistudio.google.com](https://aistudio.google.com/apikey) in Settings.
 | Stats | Known words, LingQs, coverage of your content, streak, daily goal, 30-day chart |
 
 **Word pool / passive vocabulary:** each word records how often it appears across all your
@@ -63,11 +62,8 @@ lessons (`freq`), which lessons contain it, how many times you've read past it (
 its status. *Text coverage* = share of all word occurrences in your content that you know —
 a good estimate of how comfortably you can read/listen to it.
 
-**Explanations in the language you're learning:** tapping a word, selecting a passage, or using a line's 💬 button gives an explanation in simple Spanish (or whichever language you're studying).
-- **What you get:** a paraphrase, a grammar note and example sentences, written by an AI that reads the whole transcript.
-- **Translations:** English is one tap away, under **Show English**.
-- **Still unclear?** Ask a stronger free model, DeepSeek's free chat, or a private ChatGPT chat (your subscription).
-- **Free only:** Chrome's built-in AI, or a free OpenRouter model ([setup in Settings](https://openrouter.ai/keys)).
+**Passages:** selecting a passage, or using a line's 💬 button, gives its translation, a simpler paraphrase in the language you're learning, and a grammar note.
+- **Still unclear?** Ask for a longer answer (the AI reads much more of the transcript), DeepSeek's free chat, or a private ChatGPT chat (your subscription).
 
 **AI transcription and transcript checking:** **Transcribe the audio with AI** (Import screen) writes a timed transcript with Whisper, running free on your computer. Use it for YouTube videos without captions, or for your own audio/video files.
 - **Check transcript against the audio** (in a video lesson's ⋯ menu) underlines words the audio doesn't seem to say. Tap one to replace it.
@@ -97,8 +93,8 @@ js/app.js          router + startup
 js/state.js        settings, in-memory vocabulary, word statuses, word pool, activity, TTS
 js/db.js           IndexedDB wrapper (lessons, media, words, dict cache, activity, settings)
 js/text.js         tokenizer, SRT/VTT/YouTube-transcript/text parsing, sentences, expressions
-js/dict.js         dictionary lookups (Wiktionary incl. word forms, MyMemory)
-js/translate.js    sentence translation, meaning-in-context ranking, on-device AI
+js/ai.js           Google Gemini (free tier): own key or the shared key, line translations
+js/explain.js      the one AI answer per tap (translation, meaning here, explanation)
 js/knowledge.js    automatic word levels from lookups, reading, listening and review
 js/player.js       YouTube / local media player adapter
 js/sync.js         transcript timeline (active line, word progress)

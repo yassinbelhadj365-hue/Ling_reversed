@@ -1,44 +1,25 @@
-// AI explanations of a word, phrase or passage *in context*, written first in the
-// language being learned (simple, direct-method style) and second in the native
-// language (shown only on request). Free providers only:
-//   - Chrome's built-in Gemini Nano (on-device), for quick explanations
-//   - OpenRouter free models (assist.js), for quick explanations when Nano isn't
-//     available and for "deeper" ones that read a large part of the transcript
+// One AI answer per tap (ai.js, Google Gemini free tier): the translation of the sentence,
+// what the word means *here*, and a short explanation in the language being learned,
+// written with the transcript as context. Replaces the old mix of sentence translators,
+// bilingual dictionaries and "meaning here" guesses, which often disagreed.
 import * as db from './db.js';
 import { state, langName } from './state.js';
 import { hash32 } from './text.js';
-import { getKey, openRouterJson } from './assist.js';
+import { geminiJson, sourceLabel } from './ai.js';
 
-const NANO_CONTEXT_CHARS = 1200;   // Gemini Nano has a small context window
-const CLOUD_CONTEXT_CHARS = 30000; // free cloud models read much more of the transcript
+const QUICK_CONTEXT_CHARS = 4000;  // enough to know the situation, cheap on every tap
+const DEEP_CONTEXT_CHARS = 30000;  // "Still unclear?": a large part of the transcript
 
+const S = { type: 'STRING' };
+const LIST = { type: 'ARRAY', items: S };
 export const SCHEMA = {
-  type: 'object',
+  type: 'OBJECT',
   properties: {
-    target: {
-      type: 'object',
-      properties: {
-        meaning: { type: 'string' },
-        grammar: { type: 'string' },
-        examples: { type: 'array', items: { type: 'string' } },
-      },
-      required: ['meaning', 'grammar', 'examples'],
-    },
-    native: {
-      type: 'object',
-      properties: {
-        meaning: { type: 'string' },
-        grammar: { type: 'string' },
-        translation: { type: 'string' },
-        examples: { type: 'array', items: { type: 'string' } },
-      },
-      required: ['meaning', 'grammar', 'translation', 'examples'],
-    },
-    lemma: { type: 'string' },
-    part_of_speech: { type: 'string' },
-    multiword_unit: { type: ['string', 'null'] },
+    translation: S, meaning_native: S, meaning_target: S, grammar: S,
+    examples: LIST, examples_native: LIST,
+    lemma: S, part_of_speech: S, multiword_unit: { type: 'STRING', nullable: true },
   },
-  required: ['target', 'native', 'lemma', 'part_of_speech', 'multiword_unit'],
+  required: ['translation', 'meaning_native', 'meaning_target', 'grammar', 'examples', 'examples_native', 'lemma', 'part_of_speech', 'multiword_unit'],
 };
 
 // The part of the transcript around the sentence, at most maxChars long.
@@ -51,97 +32,53 @@ export function excerptAround(transcript, sentence, maxChars) {
 }
 
 // input: {kind: 'word' | 'passage', term, sentence, transcript}
-export function buildPrompt(input, { depth = 'quick', contextChars = CLOUD_CONTEXT_CHARS } = {}) {
+export function buildPrompt(input, { depth = 'quick' } = {}) {
   const L = langName(state.settings.lang), N = langName(state.settings.native);
-  const nEx = depth === 'deep' ? 4 : 3;
+  const nEx = depth === 'deep' ? 4 : 2;
   const what = input.kind === 'passage'
-    ? `the selected passage. "target.meaning": say the same thing again in simpler ${L}. ` +
-      `"target.grammar": explain its structure (tenses, constructions, idioms) in simple ${L}. ` +
-      `"native.translation": a natural ${N} translation of the passage. "native.meaning": what it means and implies, in ${N}. ` +
-      `"native.grammar": the same structure explanation in ${N}. "target.examples": ${nEx} new short ${L} sentences that use the same structure.`
-    : `the target word or phrase exactly as it is used in the given sentence (not its general dictionary meaning). ` +
-      `"target.meaning": explain it in simple ${L}, like a monolingual learner's dictionary, using a simpler synonym or paraphrase. ` +
-      `"target.grammar": its form and why it is used here, in simple ${L}. ` +
-      `"native.meaning": the meaning here in ${N} (a few words). "native.grammar": the same note in ${N}. ` +
-      `"native.translation": a ${N} translation of the whole sentence. ` +
-      `"target.examples": ${nEx} short, natural ${L} sentences that use it the same way (typical uses, collocations).`;
+    ? `the selected passage. "translation": an accurate, natural ${N} translation of the passage. ` +
+      `"meaning_native": what it means and implies, in ${N} (one or two sentences). ` +
+      `"meaning_target": the same idea said again in simpler ${L}. ` +
+      `"grammar": its notable structures (tenses, constructions, idioms), in simple ${L}. ` +
+      `"examples": ${nEx} new short ${L} sentences using the same structure.`
+    : `the target word or phrase exactly as it is used in the given sentence, not its general dictionary meaning. ` +
+      `"translation": an accurate, natural ${N} translation of the whole sentence. ` +
+      `"meaning_native": what the target means in this sentence, in ${N}, in a few words (the word or words you used for it in the translation). ` +
+      `"meaning_target": a simple ${L} explanation, like a monolingual learner's dictionary (a simpler synonym or paraphrase). ` +
+      `"grammar": its form and why it is used here, in simple ${L}. ` +
+      `"examples": ${nEx} short, natural ${L} sentences that use it the same way.`;
   const system =
-    `You are a patient ${L} teacher who teaches through the language itself. The learner's native language is ${N}. ` +
+    `You are a careful ${L} teacher and translator. The learner's native language is ${N}. ` +
     `Use the transcript to understand the situation, the speaker and the topic. Explain ${what} ` +
-    `"native.examples": ${N} translations of target.examples, in the same order. ` +
-    `Keep grammar notes under ${depth === 'deep' ? 70 : 40} words. "lemma" and "part_of_speech" refer to the target word ` +
-    `(empty strings for a passage). "multiword_unit": the expression the word belongs to (idiom, phrasal or separable verb, fixed phrase), or null. ` +
+    `"examples_native": ${N} translations of "examples", in the same order. ` +
+    `Keep "grammar" under ${depth === 'deep' ? 70 : 35} words. "lemma" and "part_of_speech" (in ${N}) refer to the target word ` +
+    `(empty strings for a passage). "multiword_unit": the expression the word belongs to in this sentence ` +
+    `(idiom, phrasal or separable verb, fixed phrase), written as it appears in the sentence, or null. ` +
+    `Accuracy matters more than style: never guess a meaning that doesn't fit the sentence. ` +
     `${depth === 'deep' ? 'The learner already saw a short explanation and is still confused: be more thorough and mention common confusions. ' : ''}` +
-    `Reply with JSON only, matching this shape: {"target":{"meaning":"","grammar":"","examples":[]},"native":{"meaning":"","grammar":"","translation":"","examples":[]},"lemma":"","part_of_speech":"","multiword_unit":null}`;
-  const excerpt = excerptAround(input.transcript, input.sentence, contextChars);
+    `Reply with JSON only.`;
+  const excerpt = excerptAround(input.transcript, input.sentence, depth === 'deep' ? DEEP_CONTEXT_CHARS : QUICK_CONTEXT_CHARS);
   const user = `${excerpt ? `Transcript:\n"""\n${excerpt}\n"""\n\n` : ''}` +
     (input.kind === 'passage'
       ? `Passage: "${input.term}"`
       : `Sentence: ${input.sentence}\nTarget: "${input.term}"`);
-  return { system, user };
+  return { system, user, schema: SCHEMA };
 }
 
-// ---------- Gemini Nano (Chrome's built-in Prompt API) ----------
-
-// 'available' | 'downloadable' | 'downloading' | 'unavailable' | 'unsupported'
-export async function aiStatus() {
-  if (window.__lingoAI) return 'available'; // smoke-test hook
-  if (!('LanguageModel' in self)) return 'unsupported';
-  try { return await self.LanguageModel.availability(); } catch { return 'unsupported'; }
-}
-
-const nanoSessions = new Map(); // `${lang}|${native}|${kind}` -> session | 'unsupported'
-
-async function nano(input, onProgress) {
-  const { lang, native } = state.settings;
-  const key = `${lang}|${native}|${input.kind}`;
-  let base = nanoSessions.get(key);
-  if (base === 'unsupported') return null;
-  const p = buildPrompt(input, { contextChars: NANO_CONTEXT_CHARS });
-  if (!base) {
-    try {
-      base = await self.LanguageModel.create({
-        initialPrompts: [{ role: 'system', content: p.system }],
-        expectedInputs: [{ type: 'text', languages: [lang, native] }],
-        expectedOutputs: [{ type: 'text', languages: [lang, native] }],
-        monitor(m) { m.addEventListener('downloadprogress', (e) => onProgress?.(e.loaded)); },
-      });
-    } catch {
-      nanoSessions.set(key, 'unsupported'); // e.g. the model can't write this language
-      return null;
-    }
-    nanoSessions.set(key, base);
-  }
-  const s = await base.clone();
-  try {
-    return JSON.parse(await s.prompt(p.user, { responseConstraint: SCHEMA }));
-  } finally {
-    s.destroy();
-  }
-}
-
-// ---------- entry point ----------
-
-// -> {result, source} ; throws Error('no-provider') when no free AI is set up.
-// depth 'quick': Gemini Nano, else a free cloud model. 'deep': a free cloud model.
-export async function explain(input, { depth = 'quick', onProgress } = {}) {
+// -> {result, source}; throws Error('no-provider') when no AI is set up.
+// fresh: skip the cache (Settings' Test button).
+export async function explain(input, { depth = 'quick', fresh = false } = {}) {
   const { lang, native } = state.settings;
   const cacheKey = `e|${depth}|${lang}|${native}|${input.kind}|${hash32(input.sentence || '')}|${input.term}`;
-  const cached = await db.get('dict', cacheKey);
+  const cached = !fresh && await db.get('dict', cacheKey);
   if (cached) return cached.value;
-  let value = null;
-  if (depth === 'quick') {
-    if (window.__lingoAI) value = { result: await window.__lingoAI(input), source: 'On-device AI' }; // smoke-test hook
-    else if ((await aiStatus()) !== 'unsupported' && (await aiStatus()) !== 'unavailable') {
-      const result = await nano(input, onProgress).catch(() => null);
-      if (result) value = { result, source: 'On-device AI (Gemini Nano)' };
-    }
-  }
-  if (!value) {
-    if (!window.__lingoAssist && !(await getKey())) throw new Error('no-provider');
-    const { result, model } = await openRouterJson({ ...buildPrompt(input, { depth }), tier: depth === 'deep' ? 'deep' : 'quick' });
-    value = { result, source: `${model.split('/').pop().replace(/:free$/, '')} (free)` };
-  }
+  const { result, model } = await geminiJson(buildPrompt(input, { depth }));
+  const value = { result, source: sourceLabel(model) };
   await db.put('dict', { key: cacheKey, value, at: Date.now() });
+  // The reader's line translation reuses the same translation of a word's sentence.
+  const sentence = (input.kind === 'word' ? input.sentence : input.term || '').trim();
+  if (result.translation && sentence) {
+    await db.put('dict', { key: `s|${lang}|${native}|${hash32(sentence)}`, result: { text: result.translation, source: value.source }, at: Date.now() });
+  }
   return value;
 }

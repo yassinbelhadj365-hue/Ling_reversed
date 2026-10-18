@@ -1,8 +1,7 @@
 import * as db from '../db.js';
 import { state, LANGS, lang, langName, saveSettings, loadSettings, loadVocab, toast, download, esc } from '../state.js';
-import { onDeviceStatus, installOnDevice } from '../translate.js';
-import { getKey, setKey, listModels, defaultModel } from '../assist.js';
-import { aiStatus, explain } from '../explain.js';
+import { getKey, setKey, listModels } from '../ai.js';
+import { explain } from '../explain.js';
 import { MODELS as ASR_MODELS } from '../asr.js';
 
 const langOptions = (selected) =>
@@ -67,51 +66,27 @@ export async function renderSettings(view) {
     </div>
 
     <div class="card">
-      <h2 style="margin-top:0">Translation</h2>
-      <p class="small muted">Tapping a word translates the whole sentence it’s in, so you see what it means <i>here</i>.</p>
-      <div class="field"><label>On-device translator (Chrome on a computer)</label>
-        <div class="row"><span id="od-status" class="small muted">Checking…</span>
-          <button class="btn small" id="od-install" hidden>Download</button></div>
-        <span class="small muted">Private, offline and unlimited. Other browsers and phones use MyMemory, a free online service.</span></div>
-      <div class="field"><label for="translateEmail">Email for MyMemory (optional)</label>
-        <input id="translateEmail" type="text" inputmode="email" autocomplete="email" value="${esc(s.translateEmail)}" placeholder="Leave empty to stay anonymous">
-        <span class="small muted">MyMemory allows roughly 50 sentences a day without an email and about 10× more with one.
-          The email is sent to MyMemory with each request; nothing else is.</span></div>
-    </div>
-
-    <div class="card">
-      <h2 style="margin-top:0">Explanations</h2>
-      <p class="small muted">When you tap a word or select a sentence, an AI explains it <b>in the language you’re learning</b>,
-        in simple words with example sentences, using the whole transcript as context, next to the translation in your
-        native language. Free sources only: Chrome’s built-in AI (Gemini Nano,
-        on your device) or, elsewhere, the free OpenRouter model set up below.</p>
-      <div class="row"><span class="small">Chrome’s built-in AI:</span> <span id="ai-status" class="small muted">Checking…</span></div>
-      <label class="row"><input type="checkbox" data-bool="aiAuto" ${s.aiAuto ? 'checked' : ''}>
-        Explain automatically when I tap (otherwise there’s an Explain button — saves free-model daily limits)</label>
-      <div class="field" style="margin-top:12px"><label for="firstLang">In the word panel, show first</label>
-        <select id="firstLang">
-          <option value="target" ${s.firstLang !== 'native' ? 'selected' : ''}>The explanation in ${esc(langName(s.lang))}, then ${esc(langName(s.native))}</option>
-          <option value="native" ${s.firstLang === 'native' ? 'selected' : ''}>The ${esc(langName(s.native))} translation, then ${esc(langName(s.lang))}</option>
-        </select></div>
-    </div>
-
-    <div class="card">
-      <h2 style="margin-top:0">“Still unclear?” — stronger AI help (free)</h2>
-      <p class="small muted">When a word still doesn’t make sense, the word panel can ask a stronger AI. Nothing here costs money:</p>
+      <h2 style="margin-top:0">Translation &amp; explanations (AI)</h2>
+      <p class="small muted">Tapping a word asks one AI, Google Gemini (free tier), for the translation of the sentence, what the
+        word means <i>here</i>, and a short explanation in ${esc(langName(s.lang))} with examples. It reads the transcript around
+        the sentence for context.</p>
       <ul class="small">
-        <li><b>Ask DeepSeek ↗</b> and <b>Ask ChatGPT ↗</b> open their websites with your question ready (ChatGPT uses your own subscription). No setup.</li>
-        <li><b>Ask in the app</b> uses a free model on OpenRouter. Create a free account at
-          <a href="https://openrouter.ai/keys" target="_blank" rel="noopener">openrouter.ai/keys</a> (no card needed), create a key and paste it here.
-          Free models have daily limits, and only free models are offered.</li>
+        <li><b>Logged in to your account:</b> it works with no setup, using the sync server’s shared key.
+          Everyone on that server shares one free daily limit.</li>
+        <li><b>Your own key (optional):</b> gives you your own daily limit. Get one free at
+          <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a> (no card needed).</li>
       </ul>
-      <div class="field"><label for="or-key">OpenRouter key</label>
-        <input id="or-key" type="password" autocomplete="off" placeholder="sk-or-…">
-        <span class="small muted">Stored only in this browser, never included in backups, and sent only to openrouter.ai.</span></div>
-      <div class="field"><label for="or-quick">Quick explanations (every tap) — a smaller, faster free model</label>
-        <select id="or-quick"><option value="">Loading free models…</option></select></div>
-      <div class="field"><label for="or-model">“Still unclear?” — a stronger free model</label>
-        <select id="or-model"><option value="">Loading free models…</option></select></div>
-      <div class="row"><button class="btn small" id="or-test">Test</button><span id="or-status" class="small muted"></span></div>
+      <div class="field"><label for="gm-key">Your Gemini key (optional)</label>
+        <input id="gm-key" type="password" autocomplete="off" placeholder="AIza…">
+        <span class="small muted">Stored only on this device, never synced or included in backups, and sent only to Google.</span></div>
+      <div class="field"><label for="gm-model">Model</label>
+        <select id="gm-model"><option value="">Automatic (newest free Flash model)</option></select>
+        <span class="small muted">The list needs your own key. “Lite” models are faster and have a higher free limit.</span></div>
+      <label class="row"><input type="checkbox" data-bool="aiAuto" ${s.aiAuto ? 'checked' : ''}>
+        Ask automatically when I tap (otherwise there’s an Explain button, which saves the daily limit)</label>
+      <div class="row"><button class="btn small" id="gm-test">Test</button><span id="gm-status" class="small muted"></span></div>
+      <p class="small muted">“Still unclear?” in the word panel asks the same AI for a longer answer. It can also open DeepSeek or ChatGPT
+        (your own subscription) with the question ready.</p>
     </div>
 
     <div class="card">
@@ -160,60 +135,30 @@ export async function renderSettings(view) {
   $('#autoAdjustManual').addEventListener('change', (e) => saveSettings({ autoAdjustManual: e.target.checked }));
   view.querySelectorAll('[data-bool]').forEach((el) =>
     el.addEventListener('change', () => saveSettings({ [el.dataset.bool]: el.checked })));
-  $('#firstLang').addEventListener('change', (e) => saveSettings({ firstLang: e.target.value }).then(() => toast('Saved')));
   $('#asrModel').addEventListener('change', (e) => saveSettings({ asrModel: e.target.value }).then(() => toast('Saved')));
-  $('#translateEmail').addEventListener('change', (e) => saveSettings({ translateEmail: e.target.value.trim() }).then(() => toast('Saved')));
 
-  const OD_TEXT = {
-    available: 'Ready ✓', downloadable: 'Available to download', downloading: 'Downloading…',
-    unavailable: 'Not available for this language pair', unsupported: 'Not supported in this browser',
-  };
-  async function showOnDevice() {
-    const st = await onDeviceStatus(lang(), state.settings.native);
-    $('#od-status').textContent = OD_TEXT[st] || st;
-    $('#od-install').hidden = st !== 'downloadable';
+  // ---- Gemini (free tier) ----
+  async function fillModels() {
+    const key = await getKey();
+    const chosen = state.settings.geminiModel;
+    let models = [];
+    if (key) try { models = await listModels(key); } catch { /* offline or bad key: Test says which */ }
+    if (chosen && !models.some((m) => m.id === chosen)) models.unshift({ id: chosen, name: chosen });
+    $('#gm-model').innerHTML = '<option value="">Automatic (newest free Flash model)</option>' +
+      models.map((m) => `<option value="${esc(m.id)}" ${m.id === chosen ? 'selected' : ''}>${esc(m.name)}</option>`).join('');
   }
-  $('#od-install').addEventListener('click', async () => {
-    $('#od-install').disabled = true;
+  getKey().then((k) => { $('#gm-key').value = k; });
+  fillModels();
+  $('#gm-key').addEventListener('change', (e) => setKey(e.target.value).then(() => { toast('Key saved'); fillModels(); }));
+  $('#gm-model').addEventListener('change', (e) => saveSettings({ geminiModel: e.target.value }).then(() => toast('Saved')));
+  $('#gm-test').addEventListener('click', async () => {
+    $('#gm-status').textContent = 'Asking…';
     try {
-      await installOnDevice(lang(), state.settings.native, (p) => { $('#od-status').textContent = `Downloading… ${Math.round(p * 100)}%`; });
+      const { result, source } = await explain({ kind: 'word', term: 'casa', sentence: 'Mi casa es tu casa.', transcript: '' }, { fresh: true });
+      $('#gm-status').textContent = `✓ Works (${source}): “${result.meaning_native || result.translation || ''}”`;
     } catch (err) {
-      toast(`Download failed: ${err.message}`, 5000);
+      $('#gm-status').textContent = err.message === 'no-provider' ? 'No AI yet: add your key, or log in to your account.' : err.message;
     }
-    $('#od-install').disabled = false;
-    showOnDevice();
-  });
-  showOnDevice();
-
-  // ---- OpenRouter (free models only) ----
-  getKey().then((k) => { $('#or-key').value = k; });
-  $('#or-key').addEventListener('change', (e) => setKey(e.target.value).then(() => toast('Key saved')));
-  Promise.all([listModels(), defaultModel('quick'), defaultModel('deep')]).then(([models, quick, deep]) => {
-    const options = (sel) => (models.length
-      ? models.map((m) => `<option value="${esc(m.id)}" ${m.id === sel ? 'selected' : ''}>${esc(m.name)}</option>`).join('')
-      : '<option value="">No free models available right now</option>');
-    $('#or-quick').innerHTML = options(quick);
-    $('#or-model').innerHTML = options(deep);
-  }).catch(() => {
-    for (const id of ['#or-quick', '#or-model']) $(id).innerHTML = '<option value="">Couldn’t load the model list (offline?)</option>';
-  });
-  $('#or-quick').addEventListener('change', (e) => saveSettings({ quickModel: e.target.value }).then(() => toast('Saved')));
-  $('#or-model').addEventListener('change', (e) => saveSettings({ assistModel: e.target.value }).then(() => toast('Saved')));
-  $('#or-test').addEventListener('click', async () => {
-    $('#or-status').textContent = 'Asking…';
-    try {
-      const { result, source } = await explain({ kind: 'word', term: 'casa', sentence: 'Mi casa es tu casa.', transcript: '' }, { depth: 'deep' });
-      $('#or-status').textContent = `✓ Works (${source}): “${result.target?.meaning || ''}”`;
-    } catch (err) {
-      $('#or-status').textContent = err.message;
-    }
-  });
-
-  aiStatus().then((st) => {
-    $('#ai-status').textContent = {
-      available: 'Ready ✓', downloadable: 'Available — downloads the first time you tap Explain',
-      downloading: 'Downloading…', unavailable: 'Not available on this device', unsupported: 'Not supported in this browser',
-    }[st] || st;
   });
   $('#mergeCues').addEventListener('change', (e) => saveSettings({ mergeCues: e.target.checked }));
   $('#ttsRate').addEventListener('input', (e) => { $('#rateVal').textContent = e.target.value; });

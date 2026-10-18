@@ -11,7 +11,7 @@ import {
   saveSettings, speak, esc, toast, plural,
 } from '../state.js';
 import { tokenize, formatTime, sentenceAt } from '../text.js';
-import { translateSentence, ERROR_TEXT } from '../translate.js';
+import { translateSentence, ERROR_TEXT } from '../ai.js';
 import { NEW, KNOWN, isLearning } from '../srs.js';
 import { openPanel, closePanel, panelTerm } from '../panel.js';
 import { createPlayer } from '../player.js';

@@ -258,10 +258,6 @@ body.listen-mode main { max-width: 1400px; }
 .status-row button[data-s="2"] { box-shadow: inset 0 -4px 0 var(--w-2); }
 .status-row button[data-s="3"] { box-shadow: inset 0 -4px 0 var(--w-3); }
 .status-row button[data-s="4"] { box-shadow: inset 0 -4px 0 var(--w-4); }
-.defs { margin: 8px 0; padding: 0; list-style: none; }
-.defs li { padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; margin-bottom: 6px; cursor: pointer; font-size: .92rem; }
-.defs li:hover { border-color: var(--accent); }
-.defs li .pos { font-size: .75rem; color: var(--text-2); display: block; }
 .ctx { font-style: italic; color: var(--text-2); font-size: .9rem; }
 .dict-line {
   display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; align-items: center;
@@ -269,27 +265,12 @@ body.listen-mode main { max-width: 1400px; }
 }
 .dict-line > .small { grid-column: 1 / -1; }
 .meaning-here { border-color: var(--accent); }
-.defs li.fits { border-color: var(--accent); }
-.ctx-tr mark { background: transparent; color: inherit; font-weight: 700; text-decoration: underline 2px var(--accent); }
-.mono { padding: 8px 10px; margin: 4px 0 10px; border-radius: 10px; background: var(--surface-2); }
-.mono-pos { margin-top: 4px; font-style: italic; }
-.mono-defs { margin: 2px 0 6px; padding-left: 20px; }
-.mono-defs li { margin-bottom: 6px; }
-.mono-def { cursor: pointer; }
-.mono-def:hover { text-decoration: underline; }
-.mono-ex { font-size: .85rem; font-style: italic; color: var(--text-2); }
 .explain { padding: 10px 12px; border-radius: 10px; border: 1px solid var(--accent); }
 .explain .ex-meaning { font-size: 1.02rem; margin: 0 0 6px; }
 .examples { margin: 4px 0 8px; padding-left: 18px; }
 .examples li { margin-bottom: 4px; }
-/* The two meaning sections of the word panel: the target language and English, equal in weight. */
+/* The AI answer in the word panel. */
 .area { margin: 12px 0; }
-.area-label { margin: 0 0 6px; font-size: 1rem; font-weight: 700; }
-.english { padding: 10px 12px; border-radius: 10px; background: var(--surface-2); font-size: 1rem; }
-.english .dict-line { font-size: 1rem; background: var(--surface); }
-.english .ctx-tr { font-size: 1.08rem; color: var(--text); margin: 2px 0; }
-.english .defs li { font-size: 1rem; background: var(--surface); }
-.english .dict-line:first-child { margin-top: 0; }
 .sel-text { font-size: 1.1rem; }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
 .chip { border: 1px solid var(--border); border-radius: 8px; padding: 2px 8px; cursor: pointer; font: inherit; color: inherit; }
@@ -302,6 +283,7 @@ details.assist summary { cursor: pointer; }
 .ctx-block p { margin: 4px 0; }
 .ctx-sentence { font-size: 1rem; }
 .ctx-tr { color: var(--text-2); font-size: .92rem; }
+.explain .ctx-tr { color: var(--text); font-size: 1.08rem; margin: 2px 0 8px; }
 .reader p.cue { position: relative; padding-right: 30px; }
 #view.listen .reader p.cue { padding-right: 34px; }
 .line-tools { position: absolute; right: 2px; top: .45em; display: flex; flex-direction: column; gap: 4px; }

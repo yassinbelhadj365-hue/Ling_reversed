@@ -1,14 +1,13 @@
 // The word / phrase / selection panel. Side sheet on desktop, bottom sheet on phones.
 //
-// Order of help, following the direct method: first an explanation in the language
-// you're learning (simple words, examples), then — only when you press "Show English" —
-// translations, English explanations and the bilingual dictionary.
+// One AI answer (explain.js, Gemini) gives the sentence's translation, what the word
+// means here and a short explanation in the language you're learning. Only the meaning
+// that fits this sentence is shown, never a list of other senses.
 import { state, lang, langName, getWord, setStatus, saveWord, undoAuto, speak, esc, toast, statusOf } from './state.js';
-import { lookup, lookupExpression, externalLinks, monolingual } from './dict.js';
 import { NEW, KNOWN, IGNORED, isLearning } from './srs.js';
 import { progress } from './knowledge.js';
-import { translateSentence, rankByContext, sentenceLinks, ERROR_TEXT } from './translate.js';
-import { expressionCandidates, tokenize, sentenceAt } from './text.js';
+import { sentenceLinks } from './ai.js';
+import { tokenize, sentenceAt } from './text.js';
 import { explain } from './explain.js';
 import { openChatGpt, openDeepSeek, copyText } from './assist.js';
 
@@ -28,20 +27,11 @@ export function openPanel(term, {
 } = {}) {
   current = {
     term, mode, context, mark, around, flag, transcript, onFlag, onChange, onClose,
-    mono: mode === 'word' ? { state: 'loading' } : null, // dictionary in the target language
-    defs: null, tr: null, expr: null, list: [],
     explain: null, deep: null, handoff: null,
   };
   render();
   panel.hidden = false;
-  loadSentence();
   loadExplain();
-  if (mode === 'word') {
-    rememberContext();
-    loadMono();
-    loadDefs();
-    loadExpression();
-  }
 }
 
 export function closePanel() {
@@ -64,7 +54,7 @@ function aiInput() {
   return { kind: current.mode === 'selection' ? 'passage' : 'word', term: current.term, sentence: current.context, transcript: current.transcript };
 }
 
-// depth 'quick' fills the main explanation; 'deep' is the "Still unclear?" answer.
+// depth 'quick' fills the main answer; 'deep' is the "Still unclear?" answer.
 async function loadExplain({ depth = 'quick', force = false } = {}) {
   const me = current;
   if (!me.context) return;
@@ -73,10 +63,7 @@ async function loadExplain({ depth = 'quick', force = false } = {}) {
   me[slot] = { state: 'loading' };
   renderDynamic();
   try {
-    const v = await explain(aiInput(), {
-      depth,
-      onProgress: (p) => { if (stillOpen(me)) { me[slot] = { state: 'loading', progress: p }; renderDynamic(); } },
-    });
+    const v = await explain(aiInput(), { depth });
     if (!stillOpen(me)) return;
     me[slot] = { state: 'done', ...v };
   } catch (err) {
@@ -84,56 +71,20 @@ async function loadExplain({ depth = 'quick', force = false } = {}) {
     me[slot] = err.message === 'no-provider' ? { state: 'none' } : { state: 'error', msg: err.message };
   }
   renderDynamic();
+  if (slot === 'explain') rememberContext();
 }
 
-async function loadSentence() {
-  const me = current;
-  if (!me.context) return;
-  let tr;
-  try { tr = await translateSentence(me.context, lang(), state.settings.native); } catch { tr = { error: 'unavailable' }; }
-  if (!stillOpen(me)) return;
-  me.tr = tr || { error: 'unavailable' };
-  renderDynamic();
-  rememberContext();
-}
-
-async function loadMono() {
-  const me = current;
-  let value = null;
-  try { value = await monolingual(me.term, lang()); } catch { /* offline */ }
-  if (!stillOpen(me)) return;
-  me.mono = { state: 'done', value };
-  renderDynamic();
-}
-
-async function loadDefs() {
-  const me = current;
-  let results = [];
-  try { results = await lookup(me.term, lang(), state.settings.native); } catch { /* offline: the panel says so */ }
-  if (!stillOpen(me)) return;
-  me.defs = results;
-  renderDynamic();
-}
-
-async function loadExpression() {
-  const me = current;
-  if (!me.context || !me.mark || me.term.includes(' ')) return;
-  const cands = expressionCandidates(me.context, me.mark[0], lang());
-  const found = await Promise.all(cands.map((c) => lookupExpression(c.surface, lang()).catch(() => [])));
-  const k = found.findIndex((defs) => defs.length);
-  if (!stillOpen(me) || k === -1) return;
-  me.expr = { ...cands[k], defs: found[k] };
-  renderDynamic();
-}
+const answer = (slot = 'explain') => (current?.[slot]?.state === 'done' ? current[slot].result || {} : null);
 
 // LingQs keep the sentence they were met in (and its translation) for flashcards.
 async function rememberContext() {
   if (!current || current.mode !== 'word') return;
-  const { term, context, tr } = current;
+  const { term, context } = current;
+  const tr = answer()?.translation || '';
   const w = getWord(term);
   if (!w || !isLearning(w.status) || !context) return;
-  if (!w.context) { w.context = context; w.contextTr = tr?.text || ''; await saveWord(w); }
-  else if (w.context === context && !w.contextTr && tr?.text) { w.contextTr = tr.text; await saveWord(w); }
+  if (!w.context) { w.context = context; w.contextTr = tr; await saveWord(w); }
+  else if (w.context === context && !w.contextTr && tr) { w.contextTr = tr; await saveWord(w); }
 }
 
 // ---------- rendering ----------
@@ -147,10 +98,6 @@ function render() {
         <button class="btn small" data-act="close" aria-label="Close">✕</button>
       </div>
     </div>`;
-  // The explanation in the target language and the English part, in the order chosen in Settings.
-  const explainArea = `<div id="explain-area" class="area">${explainHtml()}</div>`;
-  const englishArea = `<div id="english-area" class="area">${englishHtml()}</div>`;
-  const meaning = state.settings.firstLang === 'native' ? englishArea + explainArea : explainArea + englishArea;
   const common = `
     <div id="assist-area">${assistHtml()}</div>
     ${current.onFlag ? `<p class="small"><button class="btn small" data-act="flag-wrong" title="Mark this as a transcript mistake">⚑ Flag as wrong in the transcript</button></p>` : ''}`;
@@ -158,7 +105,7 @@ function render() {
   if (current.mode === 'selection') {
     panel.innerHTML = `${head('Selected text', 'small-title')}
       <p class="ctx-sentence sel-text" dir="auto">${esc(current.context)}</p>
-      ${meaning}
+      <div id="answer-area" class="area">${answerAreaHtml()}</div>
       ${chipsHtml()}
       ${common}`;
     return;
@@ -171,11 +118,11 @@ function render() {
   const related = term.includes(' ')
     ? []
     : [...state.vocab.values()].filter((x) => x.isPhrase && isLearning(x.status) && x.term.split(' ').includes(term)).slice(0, 5);
-  // Meaning first: the sentence and the target-language explanation, then the levels.
+  // Meaning first: the sentence and the AI answer, then the levels.
   panel.innerHTML = `${head(term)}
     ${flagBoxHtml()}
     ${sentenceHtml()}
-    ${meaning}
+    <div id="answer-area" class="area">${answerAreaHtml()}</div>
     <div class="muted small">${STATUS_LABEL[status]}${where}</div>
     ${autoLine(w)}
     <div class="status-row" role="group" aria-label="Set status">
@@ -196,7 +143,7 @@ function render() {
 
 function renderDynamic() {
   if (!current) return;
-  for (const [id, fn] of [['explain-area', explainHtml], ['english-area', englishHtml], ['assist-area', assistHtml]]) {
+  for (const [id, fn] of [['answer-area', answerAreaHtml], ['assist-area', assistHtml]]) {
     const el = panel.querySelector(`#${id}`);
     if (el) el.innerHTML = fn();
   }
@@ -248,155 +195,66 @@ function autoLine(w) {
   return `<div class="auto-line"><span>${parts.join(' · ')}</span>${undo}</div>`;
 }
 
-// The target-language part of an AI answer (+ example translations when English is shown).
+// The normalized phrase of the AI's multi-word expression, when it really is several words.
+function expressionTerm(r) {
+  if (!r?.multiword_unit || current.mode !== 'word') return '';
+  const terms = tokenize(r.multiword_unit, lang()).filter((t) => t.n).map((t) => t.n);
+  const term = terms.join(' ');
+  return terms.length >= 2 && term !== current.term ? term : '';
+}
+
+// One AI answer: translation, meaning here (native), explanation in the target language, examples.
 function answerHtml(x, slot) {
   const r = x.result || {};
-  const t = r.target || {}, n = r.native || {};
-  const examples = (t.examples || []).map((e, k) => `<li dir="auto">${esc(e)}${n.examples?.[k]
-    ? `<div class="small muted" dir="auto">${esc(n.examples[k])}</div>` : ''}</li>`).join('');
-  const lemma = r.lemma && r.lemma.toLocaleLowerCase() !== current.term.toLocaleLowerCase() ? r.lemma : '';
+  const isWord = current.mode === 'word';
+  const lemma = isWord && r.lemma && r.lemma.toLocaleLowerCase() !== current.term.toLocaleLowerCase() ? r.lemma : '';
+  const expr = slot === 'explain' ? expressionTerm(r) : '';
+  const examples = (r.examples || []).map((e, k) => `<li dir="auto">${esc(e)}${r.examples_native?.[k]
+    ? `<div class="small muted" dir="auto">${esc(r.examples_native[k])}</div>` : ''}</li>`).join('');
   return `<div class="explain">
-    <p class="ex-meaning" dir="auto">${esc(t.meaning || '')}</p>
-    ${lemma || r.part_of_speech ? `<div class="small muted" dir="auto">${esc([r.part_of_speech, lemma && `→ ${lemma}`].filter(Boolean).join(' '))}</div>` : ''}
-    ${t.grammar ? `<p class="small" dir="auto">${esc(t.grammar)}</p>` : ''}
-    ${r.multiword_unit ? `<p class="small">Expression: <b dir="auto">${esc(r.multiword_unit)}</b></p>` : ''}
+    ${r.translation && slot === 'explain' ? `<p class="ctx-tr" id="ctx-tr" dir="auto">${esc(r.translation)}</p>` : ''}
+    ${r.meaning_native ? `<div class="dict-line meaning-here"><span class="small muted">${isWord ? 'Here it means' : `In ${esc(N())}`}</span>
+      <div><b dir="auto">${esc(r.meaning_native)}</b>${r.part_of_speech ? ` <span class="small muted" dir="auto">${esc(r.part_of_speech)}</span>` : ''}</div>
+      <button class="btn small" data-act="hint-native" data-slot="${slot}">Use as hint</button></div>` : ''}
+    ${r.meaning_target ? `<div class="dict-line"><span class="small muted">In ${esc(L())}</span>
+      <div><span class="ex-meaning" dir="auto">${esc(r.meaning_target)}</span>
+        ${r.grammar ? `<div class="small" dir="auto">${esc(r.grammar)}</div>` : ''}</div>
+      <button class="btn small" data-act="hint-target" data-slot="${slot}">Use as hint</button></div>` : ''}
+    ${lemma ? `<p class="small">Form of <b dir="auto">${esc(lemma)}</b> <button class="btn small" data-open-lemma="${esc(lemma)}">Open “${esc(lemma)}”</button></p>` : ''}
+    ${expr ? `<p class="small">Part of the expression <b dir="auto">${esc(r.multiword_unit)}</b>
+      <button class="btn small" data-act="save-expr">Save as phrase</button></p>` : ''}
     ${examples ? `<div class="small muted">Examples</div><ul class="examples">${examples}</ul>` : ''}
-    <div class="row"><button class="btn small" data-act="hint-target" data-slot="${slot}">Use as hint</button>
-      <span class="small muted">${esc(x.source || '')}</span></div>
+    <div class="small muted">${esc(x.source || '')}</div>
   </div>`;
 }
 
-// The dictionary written in the target language (Wiktionary of that language).
-function monoHtml() {
-  const m = current.mono;
-  if (!m) return '';
-  if (m.state === 'loading') return `<p class="small muted">Looking it up in the ${esc(L())} dictionary…</p>`;
-  if (!m.value) return '';
-  let k = 0;
-  const forms = new Set();
-  const body = m.value.entries.map((e) => `
-    ${e.pos ? `<div class="small muted mono-pos" dir="auto">${esc(e.pos)}</div>` : ''}
-    <ol class="mono-defs">${e.defs.map((d) => {
-      if (d.formOf) forms.add(d.formOf);
-      return `<li dir="auto"><span class="mono-def" data-mono="${k++}" title="Use as hint">${esc(d.text)}</span>
-        ${d.example ? `<div class="mono-ex" dir="auto">« ${esc(d.example)} »</div>` : ''}</li>`;
-    }).join('')}</ol>`).join('');
-  return `<div class="mono">
-    ${body}
-    <div class="row small">
-      ${[...forms].map((f) => `<button class="btn small" data-open="${esc(f)}">Open “${esc(f)}”</button>`).join('')}
-      <a href="${esc(m.value.url)}" target="_blank" rel="noopener" class="muted">${esc(m.value.source)}</a>
-    </div></div>`;
-}
-
-function explainHtml() {
+function answerAreaHtml() {
   const x = current.explain;
-  const hasDict = !!current.mono?.value;
-  const label = `<h3 class="area-label">In ${esc(L())}</h3>`;
-  const ai = (() => {
-    if (!x) return '';
-    if (x.state === 'loading') {
-      return `<p class="small muted">${x.progress != null && x.progress < 1
-        ? `Downloading Chrome’s AI model (one time)… ${Math.round(x.progress * 100)}%` : 'Explaining this sentence…'}</p>`;
-    }
-    if (x.state === 'idle') return `<button class="btn small" data-act="explain">Explain it in this sentence</button>`;
-    if (x.state === 'none') {
-      return hasDict
-        ? `<p class="small muted">For an explanation of <i>this exact sentence</i>, add a free OpenRouter key in Settings, or ask below.</p>`
-        : `<p class="small muted">No free AI is set up for automatic explanations yet. Add a free OpenRouter key in
-          Settings (or use Chrome, which has one built in), or ask DeepSeek or ChatGPT below.</p>`;
-    }
-    if (x.state === 'error') return `<p class="small">${esc(x.msg)}</p><button class="btn small" data-act="explain">Try again</button>`;
-    return `<div class="small muted">In this sentence</div>${answerHtml(x, 'explain')}`;
-  })();
-  return `${label}${monoHtml()}${ai}`;
+  if (!current.context) return '';
+  if (!x || x.state === 'loading') return '<p class="ctx-tr muted" id="ctx-tr">Translating…</p>';
+  if (x.state === 'idle') return '<button class="btn small" data-act="explain">Translate and explain</button>';
+  if (x.state === 'none') {
+    return `<p class="small muted">No AI is set up yet. Log in to your account (top right), or add a free Gemini key in
+      Settings. Meanwhile: ${linksHtml()}</p>`;
+  }
+  if (x.state === 'error') {
+    return `<p class="small">${esc(x.msg)}</p><div class="row"><button class="btn small" data-act="explain">Try again</button>
+      <span class="small">${linksHtml()}</span></div>`;
+  }
+  return answerHtml(x, 'explain');
 }
 
-function monoDef(i) {
-  return current.mono?.value?.entries.flatMap((e) => e.defs)[i]?.text || '';
-}
-
-function englishHtml() {
-  const label = `<h3 class="area-label">In ${esc(N())}</h3>`;
-  const parts = [];
-  if (current.context) {
-    parts.push(`<div class="dict-line"><span class="small muted">Translation</span>${trHtml()}
-      <p class="small" style="grid-column:1/-1;margin:0">Open in ${sentenceLinks(current.context, lang(), state.settings.native)
-        .map(([name, url]) => `<a href="${esc(url)}" target="_blank" rel="noopener">${name}</a>`).join(' · ')}</p></div>`);
-  }
-  for (const slot of ['explain', 'deep']) {
-    const n = current[slot]?.state === 'done' ? current[slot].result?.native : null;
-    if (!n || !(n.meaning || n.grammar)) continue;
-    parts.push(`<div class="dict-line"><span class="small muted">${slot === 'deep' ? 'Detailed explanation' : 'Explanation'} in ${esc(N())}</span>
-      <div><b dir="auto">${esc(n.meaning || '')}</b>${n.grammar ? `<div class="small">${esc(n.grammar)}</div>` : ''}</div>
-      <button class="btn small" data-act="hint-native" data-slot="${slot}">Use as hint</button></div>`);
-  }
-  if (current.mode === 'word') {
-    parts.push(dictAreaHtml());
-    parts.push(`<p class="small">${externalLinks(current.term, lang(), state.settings.native)
-      .map(([name, url]) => `<a href="${esc(url)}" target="_blank" rel="noopener">${name}</a>`).join(' · ')}</p>`);
-  }
-  return `${label}<div class="english">${parts.join('')}</div>`;
-}
-
-function trHtml() {
-  const tr = current.tr;
-  if (!tr) return '<p class="ctx-tr muted" id="ctx-tr">Translating…</p>';
-  if (tr.error) return `<p class="ctx-tr muted small" id="ctx-tr">${ERROR_TEXT[tr.error] || ERROR_TEXT.unavailable}</p>`;
-  // Highlight the translated word that the "meaning here" matched.
-  const match = ranked().find((d) => d.fits)?.match;
-  let body = esc(tr.text);
-  if (match) {
-    const re = new RegExp(`(^|[^\\p{L}])(${match.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})(?=[^\\p{L}]|$)`, 'giu');
-    body = body.replace(re, '$1<mark>$2</mark>');
-  }
-  return `<p class="ctx-tr" id="ctx-tr" dir="auto">${body} <span class="badge">${esc(tr.source)}</span></p>`;
-}
-
-function ranked() {
-  return current.defs ? rankByContext(current.defs, current.tr?.text, state.settings.native) : [];
-}
-
-function dictAreaHtml() {
-  const { term, defs, expr } = current;
-  const list = ranked();
-  current.list = list;
-  const parts = [];
-  const form = list.find((d) => d.formOf);
-  if (form) {
-    const lemmaDef = list.find((d) => d.lemma === form.formOf);
-    parts.push(`<div class="dict-line"><span class="small muted">Form</span>
-      <div><i dir="auto">${esc(term)}</i> — ${esc(form.text)}${lemmaDef ? `<br><b dir="auto">${esc(form.formOf)}</b>: ${esc(lemmaDef.text)}` : ''}</div>
-      <button class="btn small" data-open="${esc(form.formOf)}">Open “${esc(form.formOf)}”</button></div>`);
-  }
-  const here = list.find((d) => d.fits);
-  if (here) {
-    parts.push(`<div class="dict-line meaning-here"><span class="small muted">Meaning here</span>
-      <div><b dir="auto">${esc(here.text)}</b> <span class="badge">fits this sentence</span></div>
-      <button class="btn small" data-def="${list.indexOf(here)}">Use as hint</button></div>`);
-  }
-  if (expr) {
-    parts.push(`<div class="dict-line"><span class="small muted">Expression</span>
-      <div><b dir="auto">${esc(expr.surface)}</b> — ${esc(expr.defs[0].text)}</div>
-      <button class="btn small" data-act="save-expr">Save as phrase</button></div>`);
-  }
-  let items;
-  if (!defs) items = '<li class="muted">Looking up…</li>';
-  else if (!list.length) items = '<li class="muted">No results (offline, or not in the dictionary). Try the links below.</li>';
-  else {
-    items = list.map((d, i) => `<li data-def="${i}" title="Use as my hint" class="${d.fits ? 'fits' : ''}">
-      <span class="pos">${esc(d.source)} · ${esc(d.pos || '')}${d.lemma ? ` · ${esc(d.lemma)}` : ''}${d.fits ? ' · fits this sentence' : ''}</span>${esc(d.text)}</li>`).join('');
-  }
-  return `${parts.join('')}<h3 class="small muted">Dictionary</h3><ul class="defs" id="defs">${items}</ul>`;
+function linksHtml() {
+  return sentenceLinks(current.context, lang(), state.settings.native).map(([name, url]) => `<a href="${esc(url)}" target="_blank" rel="noopener">${name}</a>`).join(' · ');
 }
 
 function assistHtml() {
   if (!current.context) return '';
   const d = current.deep, h = current.handoff;
   let body = '';
-  if (d?.state === 'loading') body = '<p class="small muted">Asking a stronger free model (it reads the whole transcript)…</p>';
+  if (d?.state === 'loading') body = '<p class="small muted">Asking for a longer answer (the AI reads the whole transcript)…</p>';
   else if (d?.state === 'error') body = `<p class="small">${esc(d.msg)}</p>`;
-  else if (d?.state === 'none') body = '<p class="small">Add your free OpenRouter key in Settings to ask in the app, or use DeepSeek / ChatGPT.</p>';
+  else if (d?.state === 'none') body = '<p class="small">Log in to your account or add a free Gemini key in Settings to ask in the app, or use DeepSeek / ChatGPT.</p>';
   else if (d?.state === 'done') body = answerHtml(d, 'deep');
   if (h) {
     body += h.site === 'DeepSeek'
@@ -410,9 +268,9 @@ function assistHtml() {
       : `<p class="small handoff">Opened a private ChatGPT chat with your question${h.copied ? ' (also copied — press Ctrl+V if the box is empty)' : ''}.</p>`;
   }
   return `<details class="assist" ${d || h ? 'open' : ''}>
-      <summary class="small"><b>Still unclear?</b> Ask a stronger AI (reads the whole transcript)</summary>
+      <summary class="small"><b>Still unclear?</b> Get a longer answer (reads the whole transcript)</summary>
       <div class="row" style="margin:8px 0">
-        <button class="btn small" data-act="deep" title="A free model through your free OpenRouter key">Ask in the app</button>
+        <button class="btn small" data-act="deep" title="The same free AI, with more detail">Ask in the app</button>
         <button class="btn small" data-act="deepseek" title="Copies the question (with the transcript) and opens DeepSeek’s free chat">DeepSeek ↗</button>
         <button class="btn small" data-act="chatgpt" title="Opens a private ChatGPT chat with the question (uses your own account)">ChatGPT ↗</button>
       </div>
@@ -455,13 +313,20 @@ function afterChange() {
   onChange?.(term);
 }
 
-// Save the detected expression as a phrase LingQ (underlined in the reader).
+// Save the expression the AI found as a phrase LingQ (underlined in the reader).
 async function saveExpression() {
-  const { expr, context, onChange, onClose, transcript } = current;
-  const term = expr.terms.join(' ');
-  await setStatus(term, 1, { hint: expr.defs[0].text, context }, { manual: true });
+  const { context, onChange, onClose, transcript } = current;
+  const term = expressionTerm(answer());
+  if (!term) return;
+  await setStatus(term, 1, { context }, { manual: true });
   onChange?.(term);
   openPanel(term, { context, transcript, onChange, onClose });
+}
+
+// The dictionary form the AI named (e.g. the infinitive of a conjugated verb).
+function openLemma(lemma) {
+  const term = tokenize(lemma, lang()).filter((t) => t.n).map((t) => t.n).join(' ');
+  if (term) openPanel(term, { context: current.context, transcript: current.transcript, onChange: current.onChange, onClose: current.onClose });
 }
 
 function openWord(word) {
@@ -486,9 +351,8 @@ async function handoff(site) {
 
 panel.addEventListener('click', (e) => {
   if (!current) return;
-  const t = e.target.closest('button, li[data-def], [data-mono]');
+  const t = e.target.closest('button');
   if (!t) return;
-  if (t.dataset.mono !== undefined) return saveHint(monoDef(Number(t.dataset.mono)));
   const act = t.dataset.act;
   const slotAnswer = () => current[t.dataset.slot]?.result;
   if (act === 'close') return closePanel();
@@ -501,15 +365,15 @@ panel.addEventListener('click', (e) => {
   if (act === 'flag-edit') { const f = current.flag; closePanel(); return f.edit(); }
   if (act === 'explain') return loadExplain({ force: true });
   if (act === 'deep') return loadExplain({ depth: 'deep' });
-  if (act === 'hint-target') return saveHint(slotAnswer()?.target?.meaning || '');
-  if (act === 'hint-native') return saveHint(slotAnswer()?.native?.meaning || '');
+  if (act === 'hint-target') return saveHint(slotAnswer()?.meaning_target || '');
+  if (act === 'hint-native') return saveHint(slotAnswer()?.meaning_native || '');
   if (act === 'chatgpt') return handoff('ChatGPT');
   if (act === 'deepseek') return handoff('DeepSeek');
   if (act === 'copy-again') return copyText(current.handoff.text).then((ok) => toast(ok ? 'Copied' : 'Copying was blocked — select the text and copy it'));
   if (t.dataset.word) return openWord(t.dataset.word);
+  if (t.dataset.openLemma) return openLemma(t.dataset.openLemma);
   if (t.dataset.open) return openPanel(t.dataset.open, { context: current.context, transcript: current.transcript, onChange: current.onChange, onClose: current.onClose });
   if (t.dataset.s !== undefined) return changeStatus(Number(t.dataset.s));
-  if (t.dataset.def !== undefined) return saveHint(current.list[Number(t.dataset.def)].text);
 });
 
 panel.addEventListener('change', (e) => {

@@ -68,24 +68,21 @@ The machine has no Node, Python, or git — tooling is PowerShell + Edge.
 
 Local audio/video blobs live in the `media` store, keyed by `lessonId`, and are excluded from backups.
 
-**Translation** (`js/translate.js`):
-- `translateSentence()` tries Chrome's on-device `Translator` when the pair is installed, then MyMemory (chunked under 500 bytes; `pickMyMemory` avoids fuzzy matches for other sentences). Results are cached in the `dict` store under `s|from|to|hash32`.
+**One AI for translations and explanations** (`js/ai.js`, Google Gemini free tier). Users found the old mix of sentence translators, bilingual dictionaries and "meaning here" guesses noisy and often wrong, and asked to see only the meaning that fits the sentence. So there is no dictionary list of other senses anywhere.
+- `geminiJson({system, user, schema})` uses the user's own key (kv `secret:gemini`, never synced or backed up) directly against `generativelanguage.googleapis.com`. Without one, a signed-in user goes through the sync server's Edge Function `supabase/functions/ai/index.ts` (the owner's `GEMINI_API_KEY` secret; it rejects the anon role). With neither, it throws `no-provider`.
+- `settings.geminiModel` ('' = the newest stable `gemini-*-flash` from the live model list). `responseSchema` uses Gemini's uppercase OpenAPI types.
+- `translateSentence()` (the reader's line-translate button) is a translation-only prompt cached under `s|from|to|hash32`. A word answer also writes its sentence translation there, so both always agree.
 - The panel gets the exact sentence from `sentenceAt(text, charOffset)`, using the tapped span's `data-o`.
-- `rankByContext` picks the dictionary sense that appears in the sentence translation ("Meaning here").
-- `dict.js` `parseDefinition` reads Wiktionary form-of links (inflection → lemma). `lookupExpression` checks 2–3-word runs from `text.expressionCandidates`.
-- Tests stub these with `window.__lingoTranslate`, `__lingoDict`, `__lingoExpr`, `__lingoAI`, `__lingoAssist` and `__lingoASR`.
+- Tests stub every AI call with `window.__lingoGemini(req) → {result, model}`, plus `__lingoASR`.
 
 **Panel** (`js/panel.js`) has two modes: `word` (a word or a phrase of up to 10 words) and `selection` (a longer passage or several lines, also opened by the 💬 line button).
-- Order: the sentence, then the **explanation in the target language** (`#explain-area`), then levels and hint.
-  - The explanation starts with the monolingual dictionary (`dict.monolingual()`). It reads the target language's own Wiktionary (only the section for that language) through `parseMonolingual`, which handles the markup of the fr, es, de, it and pt editions.
-  - Below the dictionary comes the AI explanation of this sentence. Gemini Nano can't write French, so French falls through to the `quickModel` OpenRouter tier. Everything in the native language — translations, English explanations, the bilingual dictionary — is in `#english-area`, always shown. `settings.firstLang` (`'target'` or `'native'`) decides which of the two `.area` sections comes first.
+- Order: the sentence, then one AI answer (`#answer-area`: the sentence translation, "Here it means" in the native language, a short target-language explanation, examples, a lemma button and a "Save as phrase" button driven by `multiword_unit`), then levels and hint, then "Still unclear?".
 
-**AI explanations** (`js/explain.js`): `explain(input, {depth})` with `input = {kind: 'word' | 'passage', term, sentence, transcript}` returns `{target: {meaning, grammar, examples}, native: {…, translation}, lemma, part_of_speech, multiword_unit}`.
-- `quick` depth uses Gemini Nano (Chrome's `LanguageModel`, about 1.2k characters of transcript) and falls back to an OpenRouter free model. `deep` ("Still unclear?") uses OpenRouter with up to 30k characters of transcript.
-- `js/assist.js` has OpenRouter (**free `:free` models only**; it refuses any other ID) and the hand-offs:
+**AI explanations** (`js/explain.js`): `explain(input, {depth, fresh})` with `input = {kind: 'word' | 'passage', term, sentence, transcript}` makes one `geminiJson` call and returns `{result: {translation, meaning_native, meaning_target, grammar, examples, examples_native, lemma, part_of_speech, multiword_unit}, source}`, cached in `dict` under `e|depth|…`.
+- `quick` sends about 4k characters of transcript around the sentence; `deep` ("Still unclear?") up to 30k.
+- `js/assist.js` only holds the hand-offs:
   - ChatGPT: `chatgpt.com/?temporary-chat=true&q=`, a private chat.
   - DeepSeek: the question is copied, because the site can't be prefilled.
-- The OpenRouter key lives in kv `secret:openrouter`. It is never synced or backed up.
 
 **Importing on a phone** (`js/relay.js`): phones and static hosting have no `serve.ps1`, and YouTube refuses cross-origin requests (public Invidious/Piped mirrors were tried; they return empty captions). `relay.fetchTranscript` tries the local server, then the user's optional Supabase Edge Function `supabase/functions/transcript/index.ts` (a Deno port of `Get-Transcript`, called via `cloud.callFunction` with the user's token; its `blocked`/`network` errors count as "couldn't fetch", since YouTube often refuses cloud IPs). Failing both, a signed-in device leaves a request in the synced kv store (`job:<id>`: `{kind: 'transcript'|'asr', videoId, lang, track, status: pending→working→ready|error, vtt}`). Any device whose `api/capabilities` says `transcripts` picks it up after a sync (it syncs every 20 s while open, even in the background) and writes the VTT back. The requesting device (`from === deviceId()`) then creates the lesson itself via `createLesson` (shared with the Import view), so the words join its pool, and deletes the request. The Library lists pending requests (cancel, retry, another track, AI instead). `processRelay()` runs one pass; tests drive it directly. The manifest's `share_target` (Android "Share → Lingo Reader") arrives as `./?text=…`; `app.js` stashes it in sessionStorage for the Import view. The service worker never caches `/api/`.
 

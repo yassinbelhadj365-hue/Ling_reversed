@@ -6,7 +6,7 @@ Lingo Reader keeps your progress in sync between devices through your own free
 - lessons, transcripts, your corrections and flags
 - stats, settings and uploaded audio/video files
 
-The one exception is your OpenRouter key, which stays on each device.
+The one exception is your own Gemini key (if you add one), which stays on each device.
 
 ## One-time setup (about 5 minutes)
 
@@ -43,6 +43,22 @@ your computer, so nothing breaks.
 4. Leave **Verify JWT** on: only people logged in to your app can use it.
 
 The free plan includes 500,000 function calls a month; each transcript is one call.
+
+## Shared AI key (translations and explanations)
+
+The word panel's translation and explanation come from Google Gemini's free tier. With this
+function, everyone logged in to your sync server uses your key, with no setup on their side.
+They can still add their own free key in Settings to get their own daily limit.
+
+1. Get a free key at [aistudio.google.com/apikey](https://aistudio.google.com/apikey) (no card needed).
+2. In the Supabase dashboard, open **Edge Functions → Secrets** and add `GEMINI_API_KEY` with that key.
+   Optional: `GEMINI_MODEL` to choose the model (default `gemini-2.5-flash`).
+3. **Deploy a new function → Via Editor**, name it exactly `ai`, paste the whole contents of
+   [`supabase/functions/ai/index.ts`](../supabase/functions/ai/index.ts), then click **Deploy**.
+4. Leave **Verify JWT** on. The function also refuses anyone who isn't logged in.
+
+Everyone shares the free tier's limits (a few requests per minute and a daily cap). Each answer is
+cached on the device, so tapping the same word in the same sentence again costs nothing.
 
 ## How it works
 
