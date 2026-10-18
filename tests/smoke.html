@@ -4,7 +4,7 @@
 <pre id="out">running…</pre>
 <iframe id="app" src="../index.html#/library" style="width:1000px;height:800px"></iframe>
 <script type="module">
-import { tokenize, parseAny, mergeCues, youTubeId, parseSubtitles, sentenceAt, hash32 } from '../js/text.js';
+import { tokenize, parseAny, mergeCues, youTubeId, parseSubtitles, sentenceAt, hash32, contextAt } from '../js/text.js';
 import { expressionCandidates } from '../js/text.js';
 import { grade, freshSrs } from '../js/srs.js';
 import { onLookup, onPass, onManual, onReview, undoPatch, computeStatus } from '../js/knowledge.js';
@@ -134,6 +134,20 @@ try {
   ok(!(await db.exportAll()).data.kv.some((r) => r.key.startsWith('secret:')), 'backups never contain API keys');
   await db.del('kv', 'secret:test');
 
+  // ---- unit: short lookup contexts for auto-captions (text.js contextAt) ----
+  const FR = 'dessous et toi et moi je reste dans la gourmandise dans le chocolat et je vais prendre de la pâte à tartiner au [Musique] chocolat je tartine bien la confiture par-dessus le beurre en une couche épaisse et je vais';
+  const at = (s, w) => s.indexOf(w);
+  const cw = contextAt({ text: FR }, at(FR, 'confiture'));
+  ok(cw.sentence.split(' ').length <= 26 && cw.sentence.includes('confiture') && !cw.sentence.includes('Musique')
+    && FR.slice(cw.start, cw.start + cw.sentence.length) === cw.sentence, 'contextAt: unpunctuated text → a window around the word, cut at [Musique]: ' + cw.sentence);
+  const cues = ['dessous et toi', 'et moi je reste dans la gourmandise', 'dans le chocolat et je vais prendre', 'de la pâte à tartiner au chocolat',
+    'je tartine bien la confiture', 'par-dessus le beurre en une couche épaisse'].map((text, k) => ({ text, start: k * 2 }));
+  const mergedFr = mergeCues(cues, 220, 1000)[0];
+  const cc = contextAt(mergedFr, at(mergedFr.text, 'confiture'));
+  ok(cc.sentence === 'je tartine bien la confiture par-dessus le beurre en une couche épaisse', 'contextAt: in merged auto-captions, the caption line of the word (plus a very short next one): ' + cc.sentence);
+  ok(contextAt({ text: 'Hola. Compré la casa ayer. ¿Y tú?' }, 10).sentence === 'Compré la casa ayer.', 'contextAt: punctuated text → its sentence');
+  ok(mergeCues(cues).length >= 3 && mergeCues(cues).every((c) => c.text.length < 100), 'mergeCues: unpunctuated captions stay short lines');
+
   // ---- unit: the iPhone Shortcut's copied text (youtube.js) ----
   const SC_VTT_ES = 'WEBVTT\n\n00:00:01.000 --> 00:00:03.000\nHola desde el iPhone.\n';
   const SC_TEXT = `LINGO-YT\ndQw4w9WgXcQ\nUn vídeo\n=====TRACK\n{"baseUrl":"https://x","name":{"runs":[{"text":"English (auto-generated)"}]},"languageCode":"en","kind":"asr"}\n=====VTT\n` +
@@ -220,7 +234,7 @@ try {
     const term = /Target: "(.*)"/.exec(req.user)?.[1] || /Passage: "(.*)"/s.exec(req.user)?.[1] || '';
     const sentence = /Sentence: (.*)\n/.exec(req.user)?.[1] || term;
     const r = aiAnswer?.(req, term) || (term === 'comida'
-      ? { ...plain(term, sentence), meaning_native: 'food', meaning_target: 'Lo que se come.', part_of_speech: 'noun', multiword_unit: 'de comida' }
+      ? { ...plain(term, sentence), meaning_native: 'food', highlight: 'Food', meaning_target: 'Lo que se come.', part_of_speech: 'noun', multiword_unit: 'de comida' }
       : plain(term, sentence));
     return { model: 'test-model', result: r };
   };
@@ -260,6 +274,7 @@ try {
   await until(() => /food/.test(D().querySelector('#word-panel .meaning-here')?.textContent || ''));
   ok(/^Today we're going to talk about food./.test(D().querySelector('#word-panel .ctx-tr')?.textContent || ''), 'panel shows the AI translation of the exact sentence: ' + D().querySelector('#word-panel .ctx-tr')?.textContent);
   ok(/^food/.test(D().querySelector('#word-panel .meaning-here').textContent.trim()), 'one meaning, shown first: the one that fits this sentence');
+  ok(D().querySelector('#word-panel .ctx-tr mark')?.textContent === 'food', 'the word’s translation is highlighted in the sentence translation');
   ok(/Lo que se come/.test(D().querySelector('#word-panel #answer-area').textContent), 'a short explanation in Spanish');
   ok(!D().querySelector('#word-panel .defs, #word-panel .mono, #word-panel #dict-more'), 'no list of other dictionary senses');
   ok(D().querySelector('#word-panel [data-act="save-expr"]') && /de comida/.test(D().querySelector('#word-panel #answer-area').textContent), 'the expression the AI found can be saved as a phrase');

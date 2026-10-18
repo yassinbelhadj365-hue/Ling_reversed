@@ -71,22 +71,22 @@ export function parseJsonReply(text) {
   return JSON.parse(clean.slice(start, end + 1));
 }
 
-// Quick lookups skip the model's "thinking" step, which can take seconds.
-// Gemini 2.5 takes a thinking budget, later models a thinking level.
-export function thinkingOff(model) {
-  if (/^gemini-2\.5-/.test(model)) return /pro/.test(model) ? null : { thinkingBudget: 0 };
+// Quick lookups get only a little "thinking" (which can take seconds): enough to pick the right
+// meaning, not a long deliberation. Gemini 2.5 takes a thinking budget, later models a level.
+export function thinkingLight(model) {
+  if (/^gemini-2\.5-/.test(model)) return /pro/.test(model) ? null : { thinkingBudget: 512 };
   if (/^gemini-[3-9]/.test(model)) return { thinkingLevel: 'low' };
   return null;
 }
 
 // The request body Gemini expects (supabase/functions/ai builds the same one).
 export function requestBody({ system, user, schema, fast = false }, model = '') {
-  const thinking = fast && thinkingOff(model);
+  const thinking = fast && thinkingLight(model);
   return {
     systemInstruction: { parts: [{ text: system }] },
     contents: [{ role: 'user', parts: [{ text: user }] }],
     generationConfig: {
-      temperature: 0.2, responseMimeType: 'application/json',
+      temperature: 0, responseMimeType: 'application/json',
       ...(schema ? { responseSchema: schema } : {}),
       ...(thinking ? { thinkingConfig: thinking } : {}),
     },

@@ -174,13 +174,16 @@ export function parsePlainText(raw) {
 // Short caption cues read badly one per line; merge them into sentence-sized
 // chunks. Each merged line keeps `marks` ([[charOffset, start], ...]) so the
 // reader can still tell which part of the line is being spoken.
-export function mergeCues(cues, maxChars = 220) {
+// Auto-captions without any punctuation give no sentence ends to merge up to, so their
+// lines stay short (unpunctuatedMax) instead of becoming paragraph-sized.
+export function mergeCues(cues, maxChars = 220, unpunctuatedMax = 90) {
   const out = [];
   for (const cue of cues) {
     const last = out[out.length - 1];
     const lastEnded = last && /[.!?…。？！»"”)]\s*$/.test(last.text);
     const own = cue.marks || [[0, cue.start]];
-    if (last && !lastEnded && last.text.length + cue.text.length < maxChars) {
+    const max = last && !/[.!?…。？！,;:]/.test(last.text + cue.text) ? unpunctuatedMax : maxChars;
+    if (last && !lastEnded && last.text.length + cue.text.length < max) {
       const off = last.text.length + 1;
       last.marks.push(...own.map(([o, t]) => [off + o, t]));
       last.text += ' ' + cue.text;
@@ -239,6 +242,50 @@ export function sentenceAt(text, offset) {
   }
   const lead = text.length - text.trimStart().length;
   return { sentence: text.trim(), start: lead };
+}
+
+// The short piece of text a lookup is about, for the panel and the AI.
+// - Text with punctuation: the sentence (sentenceAt), when it's short enough.
+// - Auto-captions (no punctuation): the original caption line the word was in, found
+//   through the merged segment's `marks` (one per caption cue), plus the next line when
+//   it's very short.
+// - Otherwise: about `window` words on each side of the word.
+// Never crosses caption tags like [Musique] or ♪.
+// seg: {text, marks?}; offset: the tapped word's character offset in seg.text.
+// -> {sentence, start}: start = index of the context's first character in seg.text.
+const TAG = /\[[^\]\n]{0,40}\]|\([A-ZÀ-Ý][^)\n]{0,30}\)|[♪♫]+/g;
+export function contextAt(seg, offset, { maxWords = 30, window = 12 } = {}) {
+  const text = seg.text;
+  const words = (s) => s.split(/\s+/).filter(Boolean).length;
+  let a, b;
+  const s = sentenceAt(text, offset);
+  if (words(s.sentence) <= maxWords) {
+    a = s.start; b = s.start + s.sentence.length;
+  } else if (seg.marks?.length > 1) {
+    const starts = seg.marks.map(([o]) => o).sort((x, y) => x - y);
+    let k = starts.findLastIndex((o) => o <= offset);
+    if (k < 0) k = 0;
+    a = starts[k];
+    b = starts[k + 1] ?? text.length;
+    if (words(text.slice(a, b)) < 6 && k + 2 <= starts.length) b = starts[k + 2] ?? text.length;
+  } else {
+    const before = text.slice(0, offset).split(/(\s+)/);
+    let n = 0, i = before.length;
+    while (i > 0 && n < window) { i--; if (before[i].trim()) n++; }
+    a = before.slice(0, i).join('').length;
+    const after = /^(\s*\S+){0,13}/.exec(text.slice(offset))[0];
+    b = offset + after.length;
+  }
+  // Cut at caption tags, keeping the side the word is on.
+  const a0 = a;
+  for (const m of text.slice(a, b).matchAll(TAG)) {
+    const ts = a0 + m.index, te = ts + m[0].length;
+    if (te <= offset) a = Math.max(a, te);
+    else if (ts > offset) { b = Math.min(b, ts); break; }
+  }
+  const raw = text.slice(a, b);
+  const lead = raw.length - raw.trimStart().length;
+  return { sentence: raw.trim(), start: a + lead };
 }
 
 // Candidate multi-word expressions around the word at `offset` in `sentence`:

@@ -10,7 +10,7 @@ import {
   state, statusOf, setStatusMany, applyEvents, undoAuto, markSeen, bumpActivity, removeLessonFromPool, updateLessonLine,
   saveSettings, speak, esc, toast, plural,
 } from '../state.js';
-import { tokenize, formatTime, sentenceAt } from '../text.js';
+import { tokenize, formatTime, sentenceAt, contextAt } from '../text.js';
 import { translateSentence, ERROR_TEXT } from '../ai.js';
 import { NEW, KNOWN, isLearning } from '../srs.js';
 import { openPanel, closePanel, panelTerm } from '../panel.js';
@@ -439,14 +439,16 @@ export async function renderReader(view, id) {
   function open(term, p, spans) {
     reader.querySelectorAll('.w.active').forEach((n) => n.classList.remove('active'));
     spans.forEach((s) => s.classList.add('active'));
-    // The exact sentence of the occurrence you tapped, with the word's position in it.
-    const text = lesson.segments[Number(p.dataset.i)].text;
+    // The short context of the occurrence you tapped (its sentence or caption line), with the word's position in it.
+    const i = Number(p.dataset.i);
+    const seg = lesson.segments[i];
     const from = Number(spans[0].dataset.o);
     const last = spans[spans.length - 1];
     const to = Number(last.dataset.o) + last.textContent.length;
-    const { sentence, start } = sentenceAt(text, from);
+    let { sentence, start } = contextAt(seg, from);
+    // A phrase that runs past the short context: use its whole sentence instead.
+    if (to - start > sentence.length) ({ sentence, start } = sentenceAt(seg.text, from));
     const mark = from - start >= 0 && to - start <= sentence.length ? [from - start, to - start] : null;
-    const i = Number(p.dataset.i);
     const around = { prev: lesson.segments[i - 1]?.text.slice(-200) || '', next: lesson.segments[i + 1]?.text.slice(0, 200) || '' };
     const flag = spans.length === 1 && spans[0].dataset.flag !== undefined ? flagActions(i, Number(spans[0].dataset.flag)) : null;
     openPanel(term, {

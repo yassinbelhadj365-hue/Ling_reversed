@@ -80,7 +80,7 @@ Local audio/video blobs live in the `media` store, keyed by `lessonId`, and are 
 - Kept short so a lookup is quick: the meaning here (large), a one-line target-language explanation, the sentence with its translation, buttons for the lemma and the expression (`multiword_unit`), then the levels. Everything else (hint, progress, "More detail" with grammar and examples, ChatGPT/DeepSeek, Ignore, flagging) is inside a closed `details.more`. The hint fills itself with the meaning (`recordSense`).
 
 **AI explanations** (`js/explain.js`): `explain(input, {depth, fresh})` with `input = {kind: 'word' | 'passage', term, sentence, transcript}` makes one `geminiJson` call and returns `{result: {translation, meaning_native, meaning_target, grammar, examples, examples_native, lemma, part_of_speech, multiword_unit}, source}`, cached in `dict` under `e|depth|…`.
-- `quick` (every tap) asks only for the short fields (`QUICK_SCHEMA`), sends about 3k characters of transcript and sets `fast`, which turns off the model's thinking (`ai.thinkingOff`; retried without it if a model refuses). `deep` ("More detail") adds grammar and examples and sends up to 30k.
+- `quick` (every tap) asks only for the short fields (`QUICK_SCHEMA`), sends about 3k characters of transcript and sets `fast`, which limits the model's thinking to a small budget (`ai.thinkingLight`; retried without it if a model refuses); temperature 0. `deep` ("More detail") adds grammar and examples and sends up to 30k.
 - `js/assist.js` only holds the hand-offs:
   - ChatGPT: `chatgpt.com/?temporary-chat=true&q=`, a private chat.
   - DeepSeek: the question is copied, because the site can't be prefilled.

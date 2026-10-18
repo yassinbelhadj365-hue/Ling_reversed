@@ -15,7 +15,7 @@ const LIST = { type: 'ARRAY', items: S };
 const object = (properties) => ({ type: 'OBJECT', properties, required: Object.keys(properties) });
 // The tap asks only for what the panel shows at once, so the answer is short and quick.
 const QUICK = {
-  translation: S, meaning_native: S, meaning_target: S,
+  translation: S, highlight: S, meaning_native: S, meaning_target: S,
   lemma: S, part_of_speech: S, multiword_unit: { type: 'STRING', nullable: true },
   same_meaning_as: { type: 'INTEGER' },
 };
@@ -42,16 +42,22 @@ export function buildPrompt(input, { depth = 'quick' } = {}) {
     ? `the selected passage. "translation": an accurate, natural ${N} translation of the passage. ` +
       `"meaning_native": what it means and implies, in ${N} (one sentence). ` +
       `"meaning_target": the same idea said again in simpler ${L} (one sentence). ` +
+      `"highlight": an empty string. ` +
       (deep ? `"grammar": its notable structures (tenses, constructions, idioms), in simple ${L}. ` +
         `"examples": 4 new short ${L} sentences using the same structure. ` : '')
     : `the target word or phrase exactly as it is used in the given sentence, not its general dictionary meaning. ` +
-      `"translation": an accurate, natural ${N} translation of the whole sentence. ` +
-      `"meaning_native": what the target means in this sentence, in ${N}, in one to four words (the words you used for it in the translation). ` +
+      `"translation": an accurate, natural ${N} translation of the given sentence only. It may be an auto-generated caption ` +
+      `without punctuation, cut off mid-sentence: translate exactly the words it contains (add punctuation, fix obvious ` +
+      `speech-recognition mistakes, ignore tags like [Musique]); never add words from the neighbouring lines of the transcript. ` +
+      `"highlight": the word or words of your "translation" that translate the target, copied exactly as they appear there. ` +
+      `"meaning_native": what the target means in this sentence, in ${N}, in one to four words (usually the highlight, in its dictionary form). ` +
       `"meaning_target": a short, simple ${L} explanation like a monolingual learner's dictionary (a simpler synonym or a short paraphrase, at most 12 words). ` +
+      `For example (French → English), sentence "il est avocat à paris depuis", target "avocat": translation "He has been a lawyer in Paris since", ` +
+      `highlight "lawyer", meaning_native "lawyer"; but with "j'ai mangé un avocat", it is "avocado". ` +
       (deep ? `"grammar": its form and why it is used here, in simple ${L}, mentioning common confusions. ` +
         `"examples": 4 short, natural ${L} sentences that use it the same way. ` : '');
   const system =
-    `You are a careful ${L} teacher and translator. The learner's native language is ${N}. ` +
+    `You are a careful ${L} teacher and translator. The text is in ${L}; the learner's native language is ${N}. ` +
     `Use the transcript to understand the situation, the speaker and the topic. Explain ${what}` +
     (deep ? `"examples_native": ${N} translations of "examples", in the same order. Keep "grammar" under 70 words. ` : '') +
     `"lemma" and "part_of_speech" (in ${N}) refer to the target word (empty strings for a passage). ` +
@@ -63,7 +69,7 @@ export function buildPrompt(input, { depth = 'quick' } = {}) {
       : '0. '}` +
     `Accuracy matters more than style: never guess a meaning that doesn't fit the sentence. Reply with JSON only.`;
   const excerpt = excerptAround(input.transcript, input.sentence, deep ? DEEP_CONTEXT_CHARS : QUICK_CONTEXT_CHARS);
-  const user = `${excerpt ? `Transcript:\n"""\n${excerpt}\n"""\n\n` : ''}` +
+  const user = `${excerpt ? `Transcript, for context only (don't translate it):\n"""\n${excerpt}\n"""\n\n` : ''}` +
     (input.kind === 'passage'
       ? `Passage: "${input.term}"`
       : `Sentence: ${input.sentence}\nTarget: "${input.term}"`);

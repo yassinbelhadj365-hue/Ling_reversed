@@ -7,7 +7,7 @@ import { state, lang, getWord, setStatus, saveWord, undoAuto, recordSense, speak
 import { NEW, KNOWN, IGNORED, isLearning } from './srs.js';
 import { progress } from './knowledge.js';
 import { sentenceLinks } from './ai.js';
-import { tokenize, sentenceAt } from './text.js';
+import { tokenize, contextAt } from './text.js';
 import { explain } from './explain.js';
 import { openChatGpt, openDeepSeek, copyText } from './assist.js';
 
@@ -270,8 +270,17 @@ function answerAreaHtml() {
     ${r.meaning_target ? `<p class="meaning-target" dir="auto">${esc(r.meaning_target)}</p>` : ''}
     ${current.newSense ? `<p class="new-sense small"><b>New meaning for you</b> (before: ${current.newSense.before.map((m) => `“${esc(m)}”`).join(', ')}).
       It’s a LingQ again for this meaning.</p>` : ''}
-    ${sentenceHtml(r.translation ? `<p class="ctx-tr" id="ctx-tr" dir="auto">${esc(r.translation)}</p>` : '')}
+    ${sentenceHtml(r.translation ? `<p class="ctx-tr" id="ctx-tr" dir="auto">${markIn(r.translation, r.highlight)}</p>` : '')}
     ${links ? `<div class="row answer-links">${links}</div>` : ''}`;
+}
+
+// The translation with the words that translate the tapped word marked. Only marked when
+// the AI's highlight really occurs in its translation; otherwise nothing is marked.
+function markIn(text, part) {
+  const at = part ? text.toLocaleLowerCase().indexOf(String(part).trim().toLocaleLowerCase()) : -1;
+  if (!part?.trim() || at === -1) return esc(text);
+  const end = at + String(part).trim().length;
+  return `${esc(text.slice(0, at))}<mark>${esc(text.slice(at, end))}</mark>${esc(text.slice(end))}`;
 }
 
 // "More detail": grammar and examples, from a longer look at the transcript.
@@ -378,7 +387,7 @@ function openWord(word) {
     acc.o += t.t.length;
     return acc;
   }, { o: 0, found: null }).found ?? 0;
-  const { sentence, start } = sentenceAt(context, at);
+  const { sentence, start } = contextAt({ text: context }, at);
   const end = at - start + (tokenize(context.slice(at), lang())[0]?.t.length || 0);
   openPanel(word, { context: sentence, mark: [at - start, end], transcript, onChange, onClose });
 }

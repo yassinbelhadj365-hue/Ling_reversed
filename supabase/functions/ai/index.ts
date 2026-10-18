@@ -45,9 +45,9 @@ Deno.serve(async (req) => {
   if (!user || system.length + user.length > MAX_CHARS) return reply({ ok: false, error: 'Request too large' });
   const model = /^gemini-[\w.-]+$/.test(body.model || '') ? body.model! : DEFAULT_MODEL;
 
-  // Quick lookups skip the model's "thinking" step (same rule as js/ai.js thinkingOff).
+  // Quick lookups get only a little "thinking" (same rule as js/ai.js thinkingLight).
   const thinking = !body.fast ? null
-    : /^gemini-2\.5-/.test(model) ? (/pro/.test(model) ? null : { thinkingBudget: 0 })
+    : /^gemini-2\.5-/.test(model) ? (/pro/.test(model) ? null : { thinkingBudget: 512 })
     : /^gemini-[3-9]/.test(model) ? { thinkingLevel: 'low' } : null;
   const send = (withThinking: boolean) => fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
     method: 'POST',
@@ -56,7 +56,7 @@ Deno.serve(async (req) => {
       systemInstruction: { parts: [{ text: system }] },
       contents: [{ role: 'user', parts: [{ text: user }] }],
       generationConfig: {
-        temperature: 0.2, responseMimeType: 'application/json',
+        temperature: 0, responseMimeType: 'application/json',
         ...(body.schema ? { responseSchema: body.schema } : {}),
         ...(withThinking && thinking ? { thinkingConfig: thinking } : {}),
       },
