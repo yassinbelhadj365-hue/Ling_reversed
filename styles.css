@@ -378,3 +378,9 @@ tr:last-child td { border-bottom: 0; }
 .welcome h2 { margin-top: 0; }
 .welcome .steps { padding-left: 20px; margin: 4px 0 14px; }
 .welcome .steps li { margin-bottom: 6px; }
+
+/* ---------- import: one box, the rest under "More options" ---------- */
+details.more-options { margin-top: 14px; border-top: 1px solid var(--border); padding-top: 8px; }
+details.more-options > summary { cursor: pointer; color: var(--text-2); font-size: .9rem; padding: 4px 0; }
+details.more-options[open] > summary { margin-bottom: 8px; }
+details.more-options #help { margin-top: 10px; }

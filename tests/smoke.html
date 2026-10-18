@@ -622,12 +622,15 @@ try {
     : realFetch(url, ...rest);
   W().location.hash = '#/import';
   await until(() => D().getElementById('yt'));
-  const ytInput = D().getElementById('yt');
-  ytInput.value = 'https://youtu.be/dQw4w9WgXcQ';
-  ytInput.dispatchEvent(new Event('input'));
+  ok(D().querySelector('#view details.more-options:not([open]) #yt') && D().querySelector('#view details.more-options #media')
+    && D().getElementById('ai-yt').hidden, 'Import is one box: the video link field, media file and options wait under “More options”');
+  const mainBox = D().getElementById('text');
+  mainBox.value = 'https://youtu.be/dQw4w9WgXcQ';
+  mainBox.dispatchEvent(new Event('input'));
   await until(() => /WEBVTT/.test(D().getElementById('text').value));
-  ok(/^✓ Loaded/.test(D().getElementById('yt-status').textContent) && D().getElementById('title').value === 'Vídeo automático',
-    'pasting a link fetches the transcript and title: ' + D().getElementById('yt-status').textContent);
+  ok(/^✓ Loaded/.test(D().getElementById('yt-status').textContent) && D().getElementById('title').value === 'Vídeo automático'
+    && D().getElementById('yt').value === 'https://youtu.be/dQw4w9WgXcQ' && !D().getElementById('ai-yt').hidden,
+    'a YouTube link in the main box fetches the transcript and title: ' + D().getElementById('yt-status').textContent);
   ok(!D().getElementById('yt-track').hidden && D().getElementById('yt-track').options.length === 2, 'other caption tracks can be chosen');
   D().getElementById('go').click();
   await until(() => V().classList.contains('listen') && D().querySelector('#reader .w'));

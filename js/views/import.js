@@ -17,46 +17,50 @@ function takeShared() {
 }
 
 export async function renderImport(view) {
+  // One box for everything (a link, a transcript, any text) plus a file button; the rest
+  // waits under "More options".
   view.innerHTML = `
     <h1>Import into ${esc(langName(lang()))}</h1>
     <div class="card">
       <div class="field">
-        <label for="yt">YouTube link</label>
-        <div class="row" style="flex-wrap:nowrap">
-          <input id="yt" type="url" inputmode="url" placeholder="https://www.youtube.com/watch?v=…">
-          <button class="btn" id="yt-fetch" type="button">Get transcript</button>
-        </div>
-        <span class="small muted" id="yt-status" aria-live="polite">Paste a link and the transcript is fetched automatically.</span>
-        <select id="yt-track" hidden aria-label="Caption track"></select>
-        <div class="row"><button class="btn small" id="ai-yt" type="button" title="Listen to the video's audio and write the transcript with AI">🎙 Transcribe the audio with AI instead</button></div>
-      </div>
-      <div class="field">
-        <label for="title">Title</label>
-        <input id="title" type="text" placeholder="Optional — defaults to the video title, file name or first line">
-      </div>
-      <div class="field">
-        <div class="row spread"><label for="text">Transcript or text</label>
+        <div class="row spread"><label for="text">Paste a YouTube link, a transcript or any text</label>
           <button class="btn small" id="paste" type="button">📋 Paste</button></div>
-        <textarea id="text" placeholder="Paste a YouTube transcript, the contents of an .srt/.vtt file, an article, song lyrics…"></textarea>
+        <textarea id="text" placeholder="https://youtu.be/…   or subtitles (.srt/.vtt), an article, song lyrics…"></textarea>
+        <span class="small muted" id="yt-status" aria-live="polite">A YouTube link loads its transcript by itself.</span>
+        <select id="yt-track" hidden aria-label="Caption track"></select>
+        <div class="row"><button class="btn small" id="ai-yt" type="button" hidden title="Listen to the video's audio and write the transcript with AI">🎙 Transcribe the audio with AI instead</button></div>
+        <div class="row">
+          <label class="btn small" for="files">📎 Choose a file</label>
+          <input id="files" type="file" multiple hidden accept=".txt,.srt,.vtt,.md,.html,.htm,text/*,application/x-subrip,*/*">
+          <span class="small muted" id="file-names">.srt, .vtt, .txt, .md or .html</span>
+        </div>
       </div>
-      <div class="field">
-        <label for="files">…or upload files</label>
-        <input id="files" type="file" multiple accept=".txt,.srt,.vtt,.md,.html,.htm,text/*,application/x-subrip,*/*">
-        <span class="small muted">.srt, .vtt, .txt, .md or .html, also from your phone’s Files. Each file becomes its own lesson.</span>
-      </div>
-      <div class="field">
-        <label for="media">Audio or video file (optional)</label>
-        <input id="media" type="file" accept="audio/*,video/*">
-        <span class="small muted">Saved on this device and synced with the transcript’s timestamps.</span>
-        <div class="row"><button class="btn small" id="ai-file" type="button" hidden>🎙 Transcribe this file with AI</button></div>
-      </div>
-      <label class="row small"><input type="checkbox" id="merge" ${state.settings.mergeCues ? 'checked' : ''}>
-        Merge short caption lines into sentences</label>
       <p id="preview" class="small muted" aria-live="polite"></p>
       <button class="btn primary" id="go">Import</button>
-    </div>
-    <details class="card" id="help">
-      <summary><b>On a phone? / Transcript didn’t load?</b></summary>
+      <details class="more-options">
+        <summary>More options</summary>
+        <div class="field">
+          <label for="title">Title</label>
+          <input id="title" type="text" placeholder="Optional — defaults to the video title, file name or first line">
+        </div>
+        <div class="field">
+          <label for="yt">YouTube video for this transcript</label>
+          <div class="row" style="flex-wrap:nowrap">
+            <input id="yt" type="url" inputmode="url" placeholder="https://www.youtube.com/watch?v=…">
+            <button class="btn" id="yt-fetch" type="button">Get transcript</button>
+          </div>
+          <span class="small muted">Only needed when you paste or upload the transcript yourself and want the video to play with it.</span>
+        </div>
+        <div class="field">
+          <label for="media">Audio or video file</label>
+          <input id="media" type="file" accept="audio/*,video/*">
+          <span class="small muted">Saved on this device and synced with the transcript’s timestamps.</span>
+          <div class="row"><button class="btn small" id="ai-file" type="button" hidden>🎙 Transcribe this file with AI</button></div>
+        </div>
+        <label class="row small"><input type="checkbox" id="merge" ${state.settings.mergeCues ? 'checked' : ''}>
+          Merge short caption lines into sentences</label>
+        <details id="help">
+          <summary class="small"><b>On a phone? / Transcript didn’t load?</b></summary>
       <p class="small">Only a <b>computer</b> running <b>Start Lingo Reader</b> can download from YouTube (YouTube refuses
         requests from other websites, and phones can’t run the helper). There are a few ways to import on your phone:</p>
       <ol class="small">
@@ -75,7 +79,9 @@ export async function renderImport(view) {
           Subtitle files (.srt/.vtt) work too.</li>
       </ol>
       <p class="small muted">On Android, after installing the app you can also use <b>Share → Lingo Reader</b> from the YouTube app.</p>
-    </details>`;
+        </details>
+      </details>
+    </div>`;
 
   const $ = (s) => view.querySelector(s);
 
@@ -106,7 +112,7 @@ export async function renderImport(view) {
     } else {
       status('This device can’t download from YouTube itself (only a computer running Start Lingo Reader can). '
         + '<a href="#/account">Log in to your account</a> on this phone and your computer, then your computer can do it for you. '
-        + 'Or paste the transcript below — see “On a phone?” at the bottom.', true);
+        + 'Or paste the transcript into the box — see “On a phone?” under More options.', true);
     }
   }
 
@@ -203,9 +209,19 @@ export async function renderImport(view) {
     if (f) aiTranscribe(() => f.arrayBuffer());
   });
   $('#text').addEventListener('input', (e) => {
-    if (!e.isTrusted) return;
-    aiMade = false;
-    if ($('#text').value.trimStart().startsWith(SHORTCUT_MARK)) useShortcut($('#text').value);
+    if (e.isTrusted) aiMade = false; // edited by hand
+    const value = $('#text').value.trim();
+    if (value.startsWith(SHORTCUT_MARK)) return useShortcut($('#text').value);
+    // Just a YouTube link in the main box: treat it as the video and load its transcript.
+    if (youTubeId(value) && !/\s/.test(value)) {
+      $('#yt').value = value;
+      $('#text').value = '';
+      $('#yt').dispatchEvent(new Event('input'));
+    }
+  });
+  $('#files').addEventListener('change', () => {
+    const names = [...$('#files').files].map((f) => f.name);
+    $('#file-names').textContent = names.length ? names.join(', ') : '.srt, .vtt, .txt, .md or .html';
   });
 
   $('#paste').addEventListener('click', async () => {
@@ -227,6 +243,7 @@ export async function renderImport(view) {
   $('#yt-track').addEventListener('change', (e) => { if (e.target.value !== '' && (!noServer || shortcut)) fetchTranscript(e.target.value); });
   $('#yt').addEventListener('input', () => {
     const id = youTubeId($('#yt').value.trim());
+    $('#ai-yt').hidden = !id; // transcribing the audio only makes sense for a video
     if (id && id !== fetchedFor && !$('#text').value.trim()) fetchTranscript();
   });
 
