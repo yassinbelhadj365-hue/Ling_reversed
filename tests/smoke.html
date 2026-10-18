@@ -10,6 +10,7 @@ import { grade, freshSrs } from '../js/srs.js';
 import { onLookup, onPass, onManual, onReview, undoPatch, computeStatus } from '../js/knowledge.js';
 import { buildTimeline, activeIndex, charAt } from '../js/sync.js';
 import * as db from '../js/db.js';
+import { streakOf } from '../js/state.js';
 import { parseJsonReply, listModels } from '../js/ai.js';
 import { compareLine, heardBetween } from '../js/check.js';
 import { excerptAround, buildPrompt } from '../js/explain.js';
@@ -153,6 +154,17 @@ try {
   ok(lc.sentence.split(' ').length >= 20 && lc.sentence.split(' ').length <= 40 && lc.sentence.includes('diez6'), 'contextAt: never more than about 40 words: ' + lc.sentence.split(' ').length);
   ok(contextAt({ text: 'Hola. Compré la casa ayer. ¿Y tú?' }, 10).sentence === 'Compré la casa ayer.', 'contextAt: punctuated text → its sentence');
   ok(mergeCues(cues).length >= 3 && mergeCues(cues).every((c) => c.text.length < 100), 'mergeCues: unpunctuated captions stay short lines');
+
+  // ---- unit: forgiving streak (state.js streakOf) ----
+  const actDays = (list) => new Map(list.map((d) => [`2026-10-${String(d).padStart(2, '0')}`, { secs: 60 }]));
+  const NOW = new Date(2026, 9, 18, 15);
+  const sk1 = streakOf(actDays([18, 17, 16, 14, 13, 10]), NOW);
+  ok(sk1.days === 5 && sk1.saved === 1, 'streak: one missed day a week is saved, two in a row end it ' + JSON.stringify(sk1));
+  const sk2 = streakOf(actDays([17, 16]), NOW);
+  ok(sk2.days === 2 && sk2.saved === 0, 'streak: today still counts later, so yesterday’s streak shows ' + JSON.stringify(sk2));
+  const sk3 = streakOf(actDays([18, 16, 14, 13]), NOW);
+  ok(sk3.days === 2 && sk3.saved === 1, 'streak: only one saved day per week ' + JSON.stringify(sk3));
+  ok(streakOf(new Map(), NOW).days === 0, 'streak: nothing yet');
 
   // ---- unit: lesson difficulty (library.js lessonLevel) ----
   const st = { el: 5, la: 5, gato: 0, ana: -1, come: 2 };
@@ -380,6 +392,9 @@ try {
   W().location.hash = '#/stats';
   await until(() => D().querySelector('#chart svg g.col'));
   ok(D().querySelectorAll('#chart svg g.col').length === 30, 'stats chart rendered 30 days');
+  ok(/\/ 10 minutes/.test(D().getElementById('view').textContent) && /Time studied/.test(D().getElementById('view').textContent)
+    && /Day streak/.test(D().getElementById('view').textContent), 'stats: daily goal in minutes, time studied and the streak');
+  D().querySelector('#view [data-m="known"]').click();
   ok(D().querySelectorAll('#chart svg path.bar').length >= 1, 'chart has a bar for today');
 
   // library

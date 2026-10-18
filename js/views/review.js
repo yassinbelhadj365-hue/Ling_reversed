@@ -1,4 +1,4 @@
-import { state, setStatus, applyReview, bumpActivity, speak, esc, plural } from '../state.js';
+import { state, setStatus, applyReview, bumpActivity, speak, esc, plural, startStudyTimer } from '../state.js';
 import { previewInterval, isLearning, KNOWN, IGNORED } from '../srs.js';
 
 const GRADES = [['again', 'Again'], ['hard', 'Hard'], ['good', 'Good'], ['easy', 'Easy']];
@@ -100,7 +100,8 @@ export async function renderReview(view) {
   document.addEventListener('keydown', onKey);
 
   start(dueNow());
-  return () => document.removeEventListener('keydown', onKey);
+  const stopTimer = startStudyTimer(); // review time counts toward the daily goal
+  return () => { document.removeEventListener('keydown', onKey); stopTimer(); };
 }
 
 // The card is about the meaning met most recently (its sentence and hint); the word's

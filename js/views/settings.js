@@ -16,8 +16,9 @@ export async function renderSettings(view) {
         <select id="native">${langOptions(s.native)}</select></div>
       <div class="field"><label for="pageSize">Words per reader page</label>
         <input id="pageSize" type="number" min="50" max="2000" step="50" value="${s.pageSize}"></div>
-      <div class="field"><label for="dailyGoal">Daily goal (LingQs created)</label>
-        <input id="dailyGoal" type="number" min="1" max="500" value="${s.dailyGoal}"></div>
+      <div class="field"><label for="dailyMinutes">Daily goal: minutes of reading, listening or review</label>
+        <select id="dailyMinutes" style="width:auto">${[5, 10, 15, 20, 30, 45, 60].map((m) => `<option value="${m}" ${s.dailyMinutes === m ? 'selected' : ''}>${m} minutes</option>`).join('')}</select>
+        <span class="small muted">Small is fine: a short day every day beats a long one now and then. One missed day a week doesn’t break your streak.</span></div>
       <label class="row"><input type="checkbox" id="mergeCues" ${s.mergeCues ? 'checked' : ''}>
         Merge short caption lines into sentences when importing</label>
     </div>
@@ -122,7 +123,7 @@ export async function renderSettings(view) {
 
   $('#native').addEventListener('change', (e) => saveSettings({ native: e.target.value }).then(() => toast('Saved')));
   $('#pageSize').addEventListener('change', (e) => saveSettings({ pageSize: num(e.target, 50, 2000, 250) }).then(() => toast('Saved')));
-  $('#dailyGoal').addEventListener('change', (e) => saveSettings({ dailyGoal: num(e.target, 1, 500, 20) }).then(() => toast('Saved')));
+  $('#dailyMinutes').addEventListener('change', (e) => saveSettings({ dailyMinutes: Number(e.target.value) }).then(() => toast('Saved')));
   $('#pagingKnown').addEventListener('change', (e) => saveSettings({ pagingKnown: e.target.checked }));
   $('#autoStatus').addEventListener('change', (e) => {
     saveSettings({ autoStatus: e.target.checked });

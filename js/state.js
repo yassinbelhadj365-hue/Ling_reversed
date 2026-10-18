@@ -33,7 +33,7 @@ const DEFAULTS = {
   asrModel: 'base',    // AI transcription model: 'base' | 'small' (asr.js MODELS)
   aiAuto: true,        // ask the AI automatically on tap (otherwise the panel shows an Explain button)
   geminiModel: '',     // Gemini model for translations and explanations ('' = newest free Flash, ai.js)
-  dailyGoal: 20,       // LingQs created per day
+  dailyMinutes: 10,    // daily goal: minutes of reading, listening or review (state.startStudyTimer)
   ttsRate: 0.9,
   voice: '',
   mergeCues: true,
@@ -335,10 +335,68 @@ export async function bumpActivity(delta) {
   const device = db.deviceId(); // one row per device and day, summed in the stats, so syncing never loses counts
   const key = `${date}|${lang()}|${device}`;
   await db.update('activity', key, (row) => {
-    row = row || { key, date, lang: lang(), device, known: 0, lingqs: 0, read: 0, reviews: 0 };
+    row = row || { key, date, lang: lang(), device, known: 0, lingqs: 0, read: 0, reviews: 0, secs: 0 };
     for (const [k, v] of Object.entries(delta)) row[k] = (row[k] || 0) + v;
     return row;
   });
+}
+
+// ---------- study time and the daily goal ----------
+
+// The activity of the current language added up per day (one row per device and day).
+// -> Map(date -> {date, known, lingqs, read, reviews, secs})
+export async function activityByDay() {
+  const byDate = new Map();
+  for (const r of await db.byLang('activity', lang())) {
+    const sum = byDate.get(r.date) || { date: r.date, known: 0, lingqs: 0, read: 0, reviews: 0, secs: 0 };
+    for (const k of ['known', 'lingqs', 'read', 'reviews', 'secs']) sum[k] += r[k] || 0;
+    byDate.set(r.date, sum);
+  }
+  return byDate;
+}
+
+// Counts study time (reading, listening, reviewing) in 15-second steps while the page is
+// visible and the learner is active: media playing, or a tap, scroll or key in the last
+// minute. Shows a toast the moment the daily goal (settings.dailyMinutes) is reached.
+// -> stop()
+const STUDY_STEP = 15;
+export function startStudyTimer(isPlaying = () => false) {
+  let lastInput = Date.now();
+  const onInput = () => { lastInput = Date.now(); };
+  const events = ['pointerdown', 'keydown', 'wheel', 'touchstart', 'scroll'];
+  events.forEach((e) => window.addEventListener(e, onInput, { passive: true, capture: true }));
+  const timer = setInterval(async () => {
+    if (document.hidden || !(isPlaying() || Date.now() - lastInput < 60000)) return;
+    await bumpActivity({ secs: STUDY_STEP });
+    const goal = state.settings.dailyMinutes * 60;
+    const secs = (await activityByDay()).get(dayKey())?.secs || 0;
+    if (secs >= goal && secs - STUDY_STEP < goal) toast(`🎯 Daily goal reached: ${state.settings.dailyMinutes} minutes today. Nice!`, 5000);
+  }, STUDY_STEP * 1000);
+  return () => {
+    clearInterval(timer);
+    events.forEach((e) => window.removeEventListener(e, onInput, { capture: true }));
+  };
+}
+
+// Consecutive days with any study, counting back from today (today still counts if you
+// study later). Forgiving: one missed day per week is "saved" instead of breaking it.
+// byDate: activityByDay(). -> {days, saved}
+export function streakOf(byDate, now = new Date()) {
+  const active = (r) => !!r && (r.known > 0 || r.lingqs > 0 || r.read > 0 || r.reviews > 0 || r.secs > 0);
+  const d = new Date(now);
+  d.setHours(12, 0, 0, 0);
+  if (!active(byDate.get(dayKey(d)))) d.setDate(d.getDate() - 1);
+  let days = 0, saved = 0, lastSave = -Infinity;
+  for (let i = 0; i < 3650; i++, d.setDate(d.getDate() - 1)) {
+    if (active(byDate.get(dayKey(d)))) { days++; continue; }
+    if (i - lastSave < 7) break; // already saved a day this week
+    const before = new Date(d);
+    before.setDate(before.getDate() - 1);
+    if (!active(byDate.get(dayKey(before)))) break; // two missed days in a row
+    lastSave = i;
+    saved++;
+  }
+  return { days, saved };
 }
 
 // ---------- text to speech ----------

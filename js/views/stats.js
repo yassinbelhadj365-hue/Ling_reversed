@@ -1,9 +1,10 @@
 import * as db from '../db.js';
-import { state, lang, langName, dayKey, esc, plural } from '../state.js';
+import { state, lang, langName, dayKey, esc, plural, activityByDay, streakOf } from '../state.js';
 import { isLearning } from '../srs.js';
 import { poolStats } from './vocab.js';
 
 const METRICS = [
+  ['mins', 'Minutes studied (reading, listening, review)'],
   ['known', 'Words learned (moved to known)'],
   ['lingqs', 'LingQs created'],
   ['reviews', 'Flashcards reviewed'],
@@ -30,43 +31,35 @@ function niceMax(v) {
 }
 
 export async function renderStats(view) {
-  const rows = await db.byLang('activity', lang());
-  // One row per device and day: add them up.
-  const byDate = new Map();
-  for (const r of rows) {
-    const sum = byDate.get(r.date) || { date: r.date, known: 0, lingqs: 0, read: 0, reviews: 0 };
-    for (const k of ['known', 'lingqs', 'read', 'reviews']) sum[k] += r[k] || 0;
-    byDate.set(r.date, sum);
-  }
-  const today = byDate.get(dayKey()) || { known: 0, lingqs: 0, read: 0, reviews: 0 };
+  const byDate = await activityByDay();
+  for (const r of byDate.values()) r.mins = Math.round(r.secs / 60);
+  const today = byDate.get(dayKey()) || { known: 0, lingqs: 0, read: 0, reviews: 0, secs: 0, mins: 0 };
   const lessons = await db.byLang('lessons', lang());
   const pool = poolStats();
   const due = [...state.vocab.values()].filter((w) => isLearning(w.status) && (w.srs?.due ?? 0) <= Date.now()).length;
 
-  // Streak: consecutive days with any activity, counting back from today (or yesterday).
-  const active = (r) => r && (r.known > 0 || r.lingqs > 0 || r.read > 0 || r.reviews > 0);
-  let streak = 0;
-  const d = new Date();
-  if (!active(byDate.get(dayKey(d)))) d.setDate(d.getDate() - 1);
-  while (active(byDate.get(dayKey(d)))) { streak++; d.setDate(d.getDate() - 1); }
+  const streak = streakOf(byDate);
+  const totalHours = [...byDate.values()].reduce((s, r) => s + r.secs, 0) / 3600;
 
-  const goal = state.settings.dailyGoal;
-  const goalPct = Math.min(100, Math.round((today.lingqs / goal) * 100));
-  let metric = 'known';
+  const goal = state.settings.dailyMinutes;
+  const todayMins = Math.floor(today.secs / 60);
+  const goalPct = Math.min(100, Math.round((today.secs / 60 / goal) * 100));
+  let metric = 'mins';
 
   view.innerHTML = `
     <h1>${esc(langName(lang()))} stats</h1>
     <div class="card">
-      <div class="row spread"><b>Today’s goal</b><span class="small muted">${today.lingqs} / ${goal} LingQs created</span></div>
+      <div class="row spread"><b>Today’s goal${goalPct >= 100 ? ' ✓' : ''}</b><span class="small muted">${todayMins} / ${goal} minutes</span></div>
       <div class="goal" role="img" aria-label="${goalPct}% of daily goal"><div style="width:${goalPct}%"></div></div>
-      <p class="small muted" style="margin:8px 0 0">Today: ${plural(Math.max(0, today.known), 'word')} learned · ${plural(today.reviews, 'review')} · ${plural(today.read, 'word')} read</p>
+      <p class="small muted" style="margin:8px 0 0">${goalPct >= 100 ? 'Goal reached. Anything more is a bonus. ' : todayMins ? '' : 'Reading, listening and reviewing all count. '}Today: ${plural(Math.max(0, today.known), 'word')} learned · ${plural(today.lingqs, 'LingQ')} · ${plural(today.reviews, 'review')} · ${plural(today.read, 'word')} read</p>
     </div>
     <div class="tiles">
       <div class="tile"><div class="v">${pool.known.toLocaleString()}</div><div class="l">Known words</div></div>
       <div class="tile"><div class="v">${pool.learning.toLocaleString()}</div><div class="l">LingQs</div></div>
       <div class="tile"><div class="v">${Math.round(pool.coverage * 100)}%</div><div class="l">Coverage of your content</div></div>
       <div class="tile"><div class="v">${due.toLocaleString()}</div><div class="l">Reviews due</div></div>
-      <div class="tile"><div class="v">${streak}</div><div class="l">Day streak</div></div>
+      <div class="tile"><div class="v">${streak.days}</div><div class="l">Day streak${streak.saved ? ` (${plural(streak.saved, 'day')} saved)` : ''}</div></div>
+      <div class="tile"><div class="v">${totalHours < 10 ? totalHours.toFixed(1) : Math.round(totalHours)} h</div><div class="l">Time studied</div></div>
       <div class="tile"><div class="v">${lessons.length}</div><div class="l">Lessons</div></div>
     </div>
     <h2 id="chart-title"></h2>

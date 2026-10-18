@@ -8,7 +8,7 @@
 import * as db from '../db.js';
 import {
   state, statusOf, setStatusMany, applyEvents, undoAuto, markSeen, bumpActivity, removeLessonFromPool, updateLessonLine,
-  saveSettings, speak, esc, toast, plural,
+  saveSettings, speak, esc, toast, plural, startStudyTimer,
 } from '../state.js';
 import { tokenize, formatTime, sentenceAt, contextAt } from '../text.js';
 import { translateSentence, ERROR_TEXT } from '../ai.js';
@@ -138,6 +138,7 @@ export async function renderReader(view, id) {
   // ---------- media ----------
   const mediaBox = $('#media');
   const player = createPlayer(mediaBox, { youtubeId: lesson.youtubeId, blob: media?.blob, type: media?.type });
+  cleanups.push(startStudyTimer(() => !!player?.isPlaying?.())); // reading and listening time count toward the daily goal
   const timeline = buildTimeline(lesson.segments);
   const offset = () => lesson.syncOffset || 0;
   let dead = false;
