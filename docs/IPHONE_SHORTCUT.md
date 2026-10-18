@@ -28,22 +28,24 @@ When a step says *(rename: X)*, long-press the result of that action in a later 
    in **Shortcut Input**.
 3. **Get Group from Matched Text**: *Get **Group At Index** `1` in **Matches***.
 4. **Set Variable**: name `VideoID`, to **Text from Group** (the result of step 3).
+   (Optional: you can skip this and pick the **Group** variable wherever these steps say VideoID.)
 
 ### 2. Ask YouTube for the captions
 
-5. **Get Contents of URL**. URL: `https://www.youtube.com/youtubei/v1/player?prettyPrint=false`.
+5. **Text**: paste this, then replace the word `VIDEO` (keep the quotes around it) with the
+   **VideoID** variable, picked from the bar above the keyboard (it may be called **Group**):
+
+   ```
+   {"context":{"client":{"clientName":"ANDROID","clientVersion":"20.10.38","androidSdkVersion":30,"hl":"en"}},"videoId":"VIDEO"}
+   ```
+
+   **Get Contents of URL**. URL: `https://www.youtube.com/youtubei/v1/player?prettyPrint=false`.
    Tap **Show More** (the arrow):
    - **Method:** POST
-   - **Headers:** add two:
+   - **Headers:** add two (each row is **Key** on the left, value on the right):
      - `Content-Type` = `application/json`
      - `User-Agent` = `com.google.android.youtube/20.10.38 (Linux; U; Android 11) gzip`
-   - **Request Body:** JSON. Add these fields (pick the type shown first when adding each):
-     - **Dictionary** `context`, and inside it **Dictionary** `client`, and inside that:
-       - Text `clientName` = `ANDROID`
-       - Text `clientVersion` = `20.10.38`
-       - Number `androidSdkVersion` = `30`
-       - Text `hl` = `en`
-     - Text `videoId` = the **VideoID** variable (tap the field, then pick it above the keyboard)
+   - **Request Body:** **File**, then tap the File field → **Select Variable** → the **Text** block above.
 6. **Set Variable**: name `Player`, to **Contents of URL**.
 7. **Get Dictionary Value**: *Get **Value** for `videoDetails.title` in **Player***.
 8. **Set Variable**: name `Title`, to **Dictionary Value**.
