@@ -8,7 +8,7 @@
 import * as db from '../db.js';
 import {
   state, statusOf, setStatusMany, applyEvents, undoAuto, markSeen, bumpActivity, removeLessonFromPool, updateLessonLine,
-  saveSettings, speak, esc, toast, plural, startStudyTimer, activityByDay, dayKey,
+  saveSettings, tts, utterance, esc, toast, plural, startStudyTimer, activityByDay, dayKey,
 } from '../state.js';
 import { lessonLevel } from './library.js';
 import { milestoneBarHtml } from '../progress.js';
@@ -145,7 +145,7 @@ export async function renderReader(view, id) {
   const player = createPlayer(mediaBox, { youtubeId: lesson.youtubeId, blob: media?.blob, type: media?.type });
   // Reading and listening time count toward the daily goal; this visit's time goes in the summary.
   let visitSecs = 0;
-  cleanups.push(startStudyTimer(() => !!player?.isPlaying?.(), (s) => { visitSecs += s; }));
+  cleanups.push(startStudyTimer(() => !!player?.isPlaying?.() || !!reading, (s) => { visitSecs += s; }));
   const timeline = buildTimeline(lesson.segments);
   const offset = () => lesson.syncOffset || 0;
   let dead = false;
@@ -438,11 +438,80 @@ export async function renderReader(view, id) {
       player.pause();
       pausedForLookup = true;
     }
+    if (reading && S.pauseOnLookup) {
+      readPausedAt = reading.para;
+      stopReading();
+    }
   }
   function onPanelClose() {
     if (pausedForLookup && !dead && S.resumeAfterLookup) player.play();
     pausedForLookup = false;
+    if (readPausedAt != null && !dead && S.resumeAfterLookup) readAloud(readPausedAt);
+    readPausedAt = null;
   }
+
+  // ---------- read aloud (page mode): the device's voice, the spoken word highlighted ----------
+  // One utterance per sentence (long ones get cut off on some phones); "boundary" events give
+  // the character being spoken. Where a voice sends none, the paragraph is still highlighted.
+  let reading = null;      // {para, u} while reading this page
+  let readPausedAt = null; // paragraph to resume from after a lookup
+
+  const sentencesOf = (text) => {
+    const out = [];
+    const re = /[^.!?…]+[.!?…]*["»”’)]*\s*/g;
+    let m;
+    while ((m = re.exec(text))) if (m[0].trim()) out.push({ text: m[0], o: m.index });
+    return out.length ? out : [{ text, o: 0 }];
+  };
+
+  function markSpeaking(p, c) {
+    for (const s of p.querySelectorAll('.w')) {
+      const o = Number(s.dataset.o);
+      s.classList.toggle('speaking', o <= c && c < o + s.textContent.length);
+      s.classList.toggle('spoken', o + s.textContent.length <= c);
+    }
+  }
+
+  function stopReading() {
+    if (!reading) return;
+    reading.stopped = true;
+    reading = null;
+    tts()?.cancel();
+    reader.querySelectorAll('.w.speaking, .w.spoken').forEach((s) => s.classList.remove('speaking', 'spoken'));
+    reader.querySelector('p.playing')?.classList.remove('playing');
+    if ($('#tts')) $('#tts').textContent = '🔊 Listen';
+  }
+
+  function say(run, text, onChar) {
+    return new Promise((resolve) => {
+      const u = utterance(text);
+      run.u = u; // keep it referenced: Safari drops events of collected utterances
+      u.onboundary = (e) => { if (e.name !== 'sentence') onChar(e.charIndex); };
+      u.onend = u.onerror = () => resolve();
+      tts().speak(u);
+    });
+  }
+
+  async function readAloud(from = 0) {
+    stopReading();
+    if (!tts()) return toast('Text-to-speech is not supported on this device.');
+    const run = reading = { para: from };
+    $('#tts').textContent = '⏹ Stop';
+    const paras = [...reader.querySelectorAll('p.cue')];
+    for (let k = from; k < paras.length; k++) {
+      const p = paras[k];
+      run.para = k;
+      setActive(Number(p.dataset.i));
+      p.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      for (const s of sentencesOf(lesson.segments[p.dataset.i].text)) {
+        await say(run, s.text, (c) => markSpeaking(p, s.o + c));
+        if (run.stopped) return;
+      }
+      p.querySelectorAll('.w').forEach((s) => s.classList.remove('speaking', 'spoken'));
+    }
+    if (reading === run) stopReading();
+  }
+  cleanups.push(() => { readPausedAt = null; stopReading(); });
 
   // Segment i joined with its neighbours when it has no sentence punctuation (auto-captions),
   // each part keeping its caption-line marks. shift = where segment i starts in the result.
@@ -765,6 +834,7 @@ export async function renderReader(view, id) {
 
   $('#next').addEventListener('click', async () => {
     closePanel();
+    stopReading();
     if (listen) {
       // Listening already counted line by line; finishing never bulk-promotes.
       player?.pause();
@@ -801,6 +871,7 @@ export async function renderReader(view, id) {
   $('#prev')?.addEventListener('click', async () => {
     if (page === 0) return;
     closePanel();
+    stopReading();
     page--;
     lesson.page = page;
     await db.put('lessons', lesson);
@@ -808,10 +879,7 @@ export async function renderReader(view, id) {
     window.scrollTo(0, 0);
   });
 
-  $('#tts')?.addEventListener('click', () => {
-    if (window.speechSynthesis?.speaking) return speechSynthesis.cancel();
-    speak(pages[page].map((i) => lesson.segments[i].text).join(' '));
-  });
+  $('#tts')?.addEventListener('click', () => (reading ? stopReading() : readAloud()));
 
   $('#del').addEventListener('click', async () => {
     if (!confirm(`Delete “${lesson.title}”? Words you have studied stay in your vocabulary.`)) return;

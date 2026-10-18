@@ -38,6 +38,10 @@ this file records where things stand, what the owner decided, and what's next.
   Import). Gemini writes ~150/300/500 words at a level guessed from the known-word count, with
   up to 8 of the weakest LingQs and the most common known words; it becomes a text lesson.
   Not yet tried with a real key (level fit, whether it really uses the targets).
+- **Read-aloud with the spoken word highlighted** (reader page mode, 2026-10-18): 🔊 Listen
+  reads sentence by sentence with the device voice, the current word outlined; a word tap
+  pauses it, closing the panel resumes. Untested on a real iPhone (whether Safari sends word
+  `boundary` events for the French voice; without them only the paragraph is highlighted).
 - **The AI runs out less** (2026-10-18): each Gemini model has its own free limit, so when one
   is used up the next free Flash/Flash-Lite model answers (own key and shared function). The
   owner asked for this after their key ran out; other providers (Groq, Mistral) and rotating
@@ -65,8 +69,7 @@ Proposed order 1 → 2 → 3 (the owner said "continue the roadmap", so 1 was bu
 
 1. ~~Gemini transcribes any YouTube link~~: done (see Done).
 2. ~~Lessons written from your own LingQs~~: done (see Done).
-3. **Read-aloud for text lessons** with the spoken word highlighted (speechSynthesis
-   `boundary` events), so any text becomes reading-while-listening.
+3. ~~Read-aloud for text lessons~~: done (see Done).
 4. **Sentence mode** for beginners: one sentence at a time, large, replay audio, reveal the
    translation.
 

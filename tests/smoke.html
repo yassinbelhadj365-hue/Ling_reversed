@@ -793,6 +793,36 @@ try {
   ok(lingqsNow.length && storyLesson.story.targets.length && storyLesson.story.targets.every((t) => lingqsNow.includes(t))
     && storyLesson.story.targets.every((t) => storyReq.user.includes(t)), 'the story is asked to use the learner’s LingQs: ' + storyLesson.story.targets);
   ok(D().querySelector('#reader .w[data-n="gato"]'), 'the story reads like any lesson (tappable words)');
+
+  // ---- read aloud: sentence by sentence, the spoken word highlighted (fake speech engine) ----
+  const spokenTexts = [];
+  W().__lingoSpeech = {
+    gen: 0, getVoices: () => [],
+    cancel() { this.gen++; },
+    speak(u) {
+      const g = this.gen;
+      spokenTexts.push(u.text);
+      const at = u.text.indexOf('come');
+      setTimeout(() => {
+        if (g !== this.gen) return u.onerror?.({});
+        u.onboundary?.({ name: 'word', charIndex: at >= 0 ? at : 0 });
+        setTimeout(() => (g === this.gen ? u.onend : u.onerror)?.({}), 250);
+      }, 20);
+    },
+  };
+  D().getElementById('tts').click();
+  await until(() => D().querySelector('#reader .w.speaking[data-n="come"]'));
+  ok(D().getElementById('tts').textContent.includes('Stop') && D().querySelector('#reader p.playing')
+    && D().querySelector('#reader .w.spoken[data-n="gato"]'), 'Listen reads the page aloud, highlighting the word being spoken');
+  await until(() => spokenTexts.includes('Después duerme en la casa.') && D().getElementById('tts').textContent.includes('Listen'));
+  ok(spokenTexts.join('|') === 'El gato come comida.|Después duerme en la casa.' && !D().querySelector('#reader .w.speaking, #reader p.playing'),
+    'it goes on to the next paragraph and stops at the end of the page: ' + spokenTexts.join('|'));
+  D().getElementById('tts').click();
+  await until(() => spokenTexts.length === 3);
+  D().getElementById('tts').click();
+  await sleep(400);
+  ok(spokenTexts.length === 3 && D().getElementById('tts').textContent.includes('Listen') && !D().querySelector('#reader .w.speaking'), 'Stop stops it');
+  delete W().__lingoSpeech;
   W().fetch = async (url, ...rest) => String(url).startsWith('api/')
     ? new Response('Not found', { status: 404, headers: { 'content-type': 'text/plain' } }) : realFetch(url, ...rest);
 

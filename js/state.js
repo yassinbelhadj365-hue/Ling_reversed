@@ -407,16 +407,25 @@ export function streakOf(byDate, now = new Date()) {
 
 // ---------- text to speech ----------
 
-export function speak(text) {
-  if (!('speechSynthesis' in window)) return toast('Text-to-speech is not supported on this device.');
-  speechSynthesis.cancel();
+// The speech engine (tests put a fake one in window.__lingoSpeech), or null.
+export const tts = () => window.__lingoSpeech || ('speechSynthesis' in window ? window.speechSynthesis : null);
+
+// An utterance in the lesson language, with the chosen voice and speed.
+export function utterance(text) {
   const u = new SpeechSynthesisUtterance(text);
   u.lang = lang();
   u.rate = state.settings.ttsRate;
-  const voices = speechSynthesis.getVoices().filter((v) => v.lang.toLowerCase().startsWith(lang()));
+  const voices = (tts()?.getVoices?.() || []).filter((v) => v.lang.toLowerCase().startsWith(lang()));
   const v = voices.find((x) => x.voiceURI === state.settings.voice) || voices[0];
   if (v) u.voice = v;
-  speechSynthesis.speak(u);
+  return u;
+}
+
+export function speak(text) {
+  const engine = tts();
+  if (!engine) return toast('Text-to-speech is not supported on this device.');
+  engine.cancel();
+  engine.speak(utterance(text));
 }
 
 // ---------- DOM helpers ----------

@@ -193,6 +193,7 @@ textarea { min-height: 160px; resize: vertical; }
 #view.listen.dim .reader:has(.playing) .cue:not(.playing) { opacity: .5; }
 #view.listen .cue.playing { opacity: 1; background: var(--surface-2); }
 .w.spoken { box-shadow: inset 0 -2px 0 var(--accent); }
+.w.speaking { box-shadow: inset 0 -3px 0 var(--accent); outline: 2px solid color-mix(in srgb, var(--accent) 35%, transparent); border-radius: 3px; }
 .follow-bar {
   position: sticky; z-index: 15; bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom, 0px));
   display: flex; flex-wrap: wrap; gap: 6px; align-items: center; justify-content: center;
