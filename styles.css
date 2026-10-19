@@ -50,6 +50,12 @@
 
 * { box-sizing: border-box; }
 html, body { margin: 0; }
+/* iPhone feel: no bounce past the ends, no grey flash on tap, no double-tap zoom on text and
+   controls (taps answer at once), and no accidental text selection on buttons. Words stay
+   selectable: dragging across them selects a phrase. */
+html { overscroll-behavior-y: none; -webkit-tap-highlight-color: transparent; }
+.reader, .btn, button, .tabbar a, #sent-bar, .follow-bar, .flash, .panel { touch-action: manipulation; }
+.btn, button, .tabbar { -webkit-user-select: none; user-select: none; }
 body {
   background: var(--bg);
   color: var(--text);

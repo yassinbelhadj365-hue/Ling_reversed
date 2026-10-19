@@ -1,6 +1,8 @@
 // Offline support: network-first for the app shell (so updates show up immediately),
 // falling back to the cached copy when offline.
-const CACHE = 'lingo-reader-v8';
+const CACHE = 'lingo-reader-v9';
+const SLOW_MS = 2500; // a page slower than this to load: this launch uses the cache
+const slowClients = new Set(); // pages (clientIds) running on the cache
 const SHELL = [
   './', './index.html', './styles.css', './manifest.webmanifest', './icon.svg', './icon-180.png', './icon-512.png',
   './js/app.js', './js/db.js', './js/text.js', './js/srs.js', './js/state.js', './js/panel.js', './js/knowledge.js', './js/sync.js', './js/player.js', './js/ai.js', './js/assist.js', './js/asr.js', './js/asr-worker.js', './js/check.js', './js/explain.js', './js/cloud.js', './js/config.js', './js/relay.js', './js/video-ai.js', './js/story.js', './js/youtube.js', './js/samples.js', './js/progress.js', './js/dictionary.js', './js/views/account.js',
@@ -26,17 +28,32 @@ self.addEventListener('fetch', (e) => {
   // Only handle our own files; dictionary APIs and YouTube go straight to the network.
   if (e.request.method !== 'GET' || url.origin !== self.location.origin) return;
   if (url.pathname.includes('/api/')) return; // the local server's live answers (transcripts, audio)
-  e.respondWith(
-    // no-cache: always ask the server whether a file changed (GitHub Pages lets browsers keep
-    // files for 10 minutes otherwise, so phones kept running old code after an update).
-    fetch(e.request, { cache: 'no-cache' })
-      .then((res) => {
-        if (res.ok) {
-          const copy = res.clone();
-          caches.open(CACHE).then((c) => c.put(e.request, copy));
-        }
-        return res;
-      })
-      .catch(() => caches.match(e.request, { ignoreSearch: true }))
-  );
+  // no-cache: always ask the server whether a file changed (GitHub Pages lets browsers keep
+  // files for 10 minutes otherwise, so phones kept running old code after an update).
+  const network = fetch(e.request, { cache: 'no-cache' }).then((res) => {
+    if (res.ok) {
+      const copy = res.clone();
+      caches.open(CACHE).then((c) => c.put(e.request, copy));
+    }
+    return res;
+  });
+  const cached = () => caches.match(e.request, { ignoreSearch: true });
+  const fallback = () => cached().then((hit) => hit || Response.error());
+  // A slow connection doesn't hold the app up: when the page itself takes longer than SLOW_MS,
+  // that launch runs entirely on the saved copies (all files from the same version, never a
+  // mix of old and new). The network answers still refresh the cache for the next launch.
+  if (slowClients.has(e.clientId)) {
+    e.respondWith(cached().then((hit) => hit || network).catch(fallback));
+    return;
+  }
+  if (e.request.mode !== 'navigate') {
+    e.respondWith(network.catch(fallback));
+    return;
+  }
+  const slow = new Promise((r) => setTimeout(r, SLOW_MS)).then(cached).then((hit) => {
+    if (!hit) return network;
+    slowClients.add(e.resultingClientId);
+    return hit;
+  });
+  e.respondWith(Promise.race([network, slow]).catch(fallback));
 });

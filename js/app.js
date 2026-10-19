@@ -28,11 +28,18 @@ const view = document.getElementById('view');
 const langSelect = document.getElementById('lang-select');
 let cleanup = null;
 
+// Each screen comes back where you left it (the Library after a lesson, a long vocab list);
+// a redraw of the same screen (after a sync) keeps its place. Lessons place themselves.
+const scrolls = new Map(); // hash -> scrollY
+let shownHash = null;
+
 async function route() {
   cleanup?.();
   cleanup = null;
   closePanel();
   if ('speechSynthesis' in window) speechSynthesis.cancel();
+  if (shownHash) scrolls.set(shownHash, window.scrollY);
+  shownHash = location.hash;
 
   const [name = 'library', arg] = location.hash.replace(/^#\/?/, '').split('/');
   const render = VIEWS[name] || renderLibrary;
@@ -40,6 +47,7 @@ async function route() {
   document.querySelectorAll('.tabbar a').forEach((a) => a.classList.toggle('active', a.dataset.tab === tab));
   langSelect.value = lang();
 
+  const hash = location.hash;
   view.innerHTML = '';
   try {
     cleanup = (await render(view, arg)) || null;
@@ -47,6 +55,7 @@ async function route() {
     console.error(err);
     view.innerHTML = `<div class="empty">Something went wrong: ${String(err.message || err)}</div>`;
   }
+  if (name !== 'lesson' && location.hash === hash && !arg) window.scrollTo(0, scrolls.get(hash) || 0);
 }
 
 function showError(msg) {
@@ -92,21 +101,17 @@ async function init() {
   showAccount();
   onStatus(showAccount);
   if (account) {
-    // Get other devices' changes before showing anything (but don't wait long when offline).
-    await Promise.race([
-      startSync({
-        onRemoteChange: async () => {
-          await loadSettings();
-          await loadVocab();
-          const name = location.hash.split('/')[1];
-          if (['lesson', 'import', 'review'].includes(name)) toast('Synced changes from your other device');
-          else route();
-        },
-      }),
-      new Promise((r) => setTimeout(r, 4000)),
-    ]);
-    await loadSettings();
-    await loadVocab();
+    // The app opens at once from this device's data; other devices' changes arrive in the
+    // background and quietly redraw the Library, Vocab or Stats (a lesson or review in
+    // progress is left alone: their words are already updated in memory).
+    startSync({
+      onRemoteChange: async () => {
+        await loadSettings();
+        await loadVocab();
+        const name = location.hash.split('/')[1] || 'library';
+        if (['library', 'vocab', 'stats'].includes(name)) route();
+      },
+    }).catch(() => { /* offline: the account button shows it */ });
     // Imports a phone asked this computer to do, and lessons coming back to the phone.
     startRelay({ onChange: () => { if (/^#\/library/.test(location.hash) || !location.hash) route(); } });
   }
