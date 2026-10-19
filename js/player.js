@@ -36,16 +36,18 @@ function emitter() {
 
 export function createPlayer(box, media) {
   if (window.__lingoFakePlayer) return window.__lingoFakePlayer(box, media); // smoke-test hook
-  if (media.youtubeId) return youTubePlayer(box, media.youtubeId);
-  if (media.blob) return mediaElementPlayer(box, media.blob, media.type);
+  if (media.youtubeId) return youTubePlayer(box, media.youtubeId, media.start);
+  if (media.blob) return mediaElementPlayer(box, media.blob, media.type, media.start);
   return null;
 }
 
-function mediaElementPlayer(box, blob, type) {
+// start: where to open (seconds), without playing: the first Play continues from there.
+function mediaElementPlayer(box, blob, type, start = 0) {
   const url = URL.createObjectURL(blob);
   const isVideo = (type || '').startsWith('video');
   box.innerHTML = isVideo ? `<video controls playsinline src="${url}"></video>` : `<audio controls src="${url}"></audio>`;
   const el = box.firstElementChild;
+  if (start) el.addEventListener('loadedmetadata', () => { el.currentTime = start; }, { once: true });
   const ev = emitter();
   el.addEventListener('play', () => ev.emit('state', true));
   el.addEventListener('pause', () => ev.emit('state', false));
@@ -63,14 +65,14 @@ function mediaElementPlayer(box, blob, type) {
   };
 }
 
-function youTubePlayer(box, id) {
+function youTubePlayer(box, id, start = 0) {
   const origin = encodeURIComponent(location.origin);
   box.innerHTML = `<iframe allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen
-    src="https://www.youtube.com/embed/${esc(id)}?enablejsapi=1&playsinline=1&rel=0&origin=${origin}"></iframe>`;
+    src="https://www.youtube.com/embed/${esc(id)}?enablejsapi=1&playsinline=1&rel=0${start ? `&start=${Math.floor(start)}` : ''}&origin=${origin}"></iframe>`;
   const frame = box.querySelector('iframe');
   const ev = emitter();
   // Clock: last reported time + elapsed wall time while playing.
-  let t = 0, at = performance.now(), playing = false, rate = 1;
+  let t = start, at = performance.now(), playing = false, rate = 1;
   let api = null;          // YT.Player once ready
   let poll = null;
   let dead = false;

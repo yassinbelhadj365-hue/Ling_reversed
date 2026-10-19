@@ -221,7 +221,8 @@ textarea { min-height: 160px; resize: vertical; }
   margin-top: 8px; padding: 8px; border-radius: var(--radius);
   background: var(--surface); border: 1px solid var(--border); box-shadow: 0 -4px 16px rgb(0 0 0 / .08);
 }
-.follow-bar .btn.small { min-width: 40px; }
+.follow-bar .btn.small { min-width: 44px; min-height: 44px; font-size: 1.05rem; } /* thumb-sized */
+.follow-more .btn.small { min-height: 36px; font-size: .85rem; }
 .follow-toggle { display: inline-flex; gap: 4px; align-items: center; padding: 0 4px; }
 .follow-bar .sync { display: inline-flex; gap: 4px; align-items: center; color: var(--text-2); }
 .follow-more { flex-basis: 100%; display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; align-items: center; }
@@ -281,8 +282,10 @@ body.listen-mode main { max-width: 1400px; }
 /* While the word sheet is open on a phone, the page can scroll its last line above it. */
 @media (max-width: 720px) { body.panel-room #view { padding-bottom: 70vh; } }
 .panel-word { font-size: 1.6rem; font-weight: 700; margin: 0; overflow-wrap: anywhere; }
-.status-row { display: grid; grid-template-columns: repeat(4, 1fr) 1.4fr; gap: 6px; margin: 12px 0; }
-.status-row button { min-height: 40px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface); cursor: pointer; font-weight: 600; }
+.status-row { display: grid; grid-template-columns: repeat(4, 1fr) 1.4fr 1.2fr; gap: 6px; margin: 12px 0; }
+.status-row button.ignore { font-weight: 500; color: var(--text-2); }
+.status-row button.ignore.on { color: var(--accent-ink); }
+.status-row button { min-height: 44px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface); cursor: pointer; font-weight: 600; }
 .status-row button.on { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
 .status-row button[data-s="1"] { box-shadow: inset 0 -4px 0 var(--w-1); }
 .status-row button[data-s="2"] { box-shadow: inset 0 -4px 0 var(--w-2); }
@@ -459,3 +462,17 @@ details.more-options #help { margin-top: 10px; }
 .sent-bar .sent-tr { font-size: 1.15em; text-align: center; margin: 0 0 12px; }
 .sent-bar .row { flex-wrap: nowrap; gap: 6px; }
 @media (max-width: 420px) { .sent-bar .btn { padding-left: 10px; padding-right: 10px; } }
+
+/* ---------- thumb-sized targets and the bottom sheet on phones ---------- */
+.panel-head .btn.small { min-width: 44px; min-height: 44px; font-size: 1rem; }
+@media (pointer: coarse) {
+  .tr-btn { min-width: 40px; min-height: 40px; font-size: .95rem; }
+  .line-tools { gap: 6px; top: 0; }
+  .reader p.cue, #view.listen .reader p.cue { padding-right: 46px; }
+}
+@media (max-width: 720px) {
+  /* A grab handle: the sheet closes with a swipe down (panel.js). */
+  .panel::before { content: ''; display: block; width: 40px; height: 5px; border-radius: 3px; background: var(--border); margin: -6px auto 8px; }
+  /* Toasts go above an open sheet instead of covering its buttons. */
+  body:has(#word-panel:not([hidden])) #toast { bottom: auto; top: calc(env(safe-area-inset-top, 0px) + 64px); }
+}

@@ -23,11 +23,14 @@ let current = null;
 // around: {prev, next} neighbouring lines. transcript: the whole lesson text, for AI context.
 // flag: a transcript flag on this word {said, heard, manual, replace(), dismiss(), edit()}.
 // onFlag: marks this text as wrong in the transcript.
+// compact: the reader shows the sentence just above (listen mode), so the panel shows only its
+// translation and the levels come up within reach. onEdit: correct the transcript line.
 export function openPanel(term, {
   mode = 'word', context = '', mark = null, around = {}, flag = null, transcript = '', onFlag = null, onChange, onClose,
+  compact = false, onEdit = null,
 } = {}) {
   current = {
-    term, mode, context, mark, around, flag, transcript, onFlag, onChange, onClose,
+    term, mode, context, mark, around, flag, transcript, onFlag, onChange, onClose, compact, onEdit,
     explain: null, deep: null, handoff: null, newSense: null, dict: null,
   };
   // The offline dictionary's meaning shows at once; the AI's meaning in this sentence replaces it.
@@ -94,15 +97,8 @@ async function afterAnswer(me) {
   const res = await recordSense(me.term, me.context, me.explain.result).catch(() => null);
   if (res?.isNew) {
     me.onChange?.(me.term);
+    // Said (with its Undo) in the panel itself, not in a toast on top of the controls.
     if (stillOpen(me)) { me.newSense = res; render(); }
-    toast(`New meaning of “${me.term}”: it’s a LingQ again`, 6000, {
-      label: 'Undo',
-      onClick: async () => {
-        await res.undo();
-        me.onChange?.(me.term);
-        if (stillOpen(me)) { me.newSense = null; render(); }
-      },
-    });
   }
   await rememberContext();
 }
@@ -158,6 +154,7 @@ function render() {
     <div class="status-row" role="group" aria-label="Set status">
       ${[1, 2, 3, 4].map((s) => `<button data-s="${s}" class="${status === s ? 'on' : ''}" title="LingQ level ${s} (key ${s})">${s}</button>`).join('')}
       <button data-s="${KNOWN}" class="${status === KNOWN ? 'on' : ''}" title="Known (key K)">✓ Known</button>
+      <button data-s="${IGNORED}" class="ignore ${status === IGNORED ? 'on' : ''}" title="Ignore — names, typos (key X)">Ignore</button>
     </div>
     ${undoLine(w)}
     <details class="more" ${current.moreOpen ? 'open' : ''}><summary>More</summary>
@@ -170,9 +167,9 @@ function render() {
       </div>
       ${related.length ? `<p class="small">In phrases: ${related.map((r) => `<button class="btn small" data-open="${esc(r.term)}">${esc(r.term)}</button>`).join(' ')}</p>` : ''}
       <div class="row">
-        <button class="btn small" data-s="${IGNORED}" title="Ignore — names, typos (key X)">${status === IGNORED ? 'Ignored' : 'Ignore'}</button>
         ${status !== NEW ? `<button class="btn small" data-s="${NEW}">Reset to new</button>` : ''}
         ${flagBtn}
+        ${current.onEdit ? '<button class="btn small" data-act="edit-line" title="Correct this line of the transcript">✎ Correct this line</button>' : ''}
       </div>
     </details>`;
 }
@@ -188,6 +185,7 @@ function renderDynamic() {
 function sentenceHtml(translation) {
   const { context, mark } = current;
   if (!context || current.mode === 'selection') return '';
+  if (current.compact) return translation ? `<div class="ctx-block">${translation}</div>` : '';
   const body = mark
     ? `${esc(context.slice(0, mark[0]))}<mark>${esc(context.slice(mark[0], mark[1]))}</mark>${esc(context.slice(mark[1]))}`
     : esc(context);
@@ -292,7 +290,7 @@ function answerAreaHtml() {
       ? ` <span class="pos small muted" dir="auto">${esc(r.part_of_speech)}</span>` : ''}</p>
     ${r.meaning_target ? `<p class="meaning-target" dir="auto">${esc(r.meaning_target)}</p>` : ''}
     ${current.newSense ? `<p class="new-sense small"><b>New meaning for you</b> (before: ${current.newSense.before.map((m) => `“${esc(m)}”`).join(', ')}).
-      It’s a LingQ again for this meaning.</p>` : ''}
+      It’s a LingQ again for this meaning. <button class="btn small" data-act="undo-sense">Undo</button></p>` : ''}
     ${sentenceHtml(r.translation ? `<p class="ctx-tr" id="ctx-tr" dir="auto">${markIn(r.translation, r.highlight)}</p>` : '')}
     ${links ? `<div class="row answer-links">${links}</div>` : ''}`;
 }
@@ -358,6 +356,8 @@ async function changeStatus(status) {
   const w = getWord(term);
   await setStatus(term, status, { context: w?.context || context }, { manual: true });
   afterChange();
+  // Known or Ignore: nothing more to learn here, so the panel gets out of the way.
+  if (status === KNOWN || status === IGNORED) closePanel();
 }
 
 async function undo() {
@@ -430,6 +430,11 @@ panel.addEventListener('click', (e) => {
   if (act === 'close') return closePanel();
   if (act === 'speak') return speak(current.mode === 'selection' ? current.context : current.term);
   if (act === 'undo') return undo();
+  if (act === 'undo-sense') {
+    const me = current;
+    return me.newSense.undo().then(() => { me.onChange?.(me.term); if (stillOpen(me)) { me.newSense = null; render(); } });
+  }
+  if (act === 'edit-line') return current.onEdit(); // the reader closes the panel, keeping the video paused
   if (act === 'save-expr') return saveExpression();
   if (act === 'flag-wrong') return current.onFlag();
   if (act === 'flag-replace') return current.flag.replace();
@@ -472,3 +477,17 @@ document.addEventListener('keydown', (e) => {
   else return;
   e.preventDefault();
 });
+
+// Closing without aiming: a tap anywhere outside the panel (except on a word, which opens that
+// word, or on another control), or a swipe down on the sheet. Closing resumes the video.
+document.addEventListener('click', (e) => {
+  if (!current || panel.hidden || panel.contains(e.target)) return;
+  if (e.target.closest('.w, button, a, input, select, textarea, label, iframe, video, audio, #toast, .tabbar, .topbar')) return;
+  if (String(window.getSelection?.() || '').trim()) return; // selecting a phrase
+  closePanel();
+});
+let swipeFrom = null;
+panel.addEventListener('touchstart', (e) => { swipeFrom = panel.scrollTop <= 0 ? e.touches[0].clientY : null; }, { passive: true });
+panel.addEventListener('touchmove', (e) => {
+  if (swipeFrom != null && e.touches[0].clientY - swipeFrom > 80) { swipeFrom = null; closePanel(); }
+}, { passive: true });

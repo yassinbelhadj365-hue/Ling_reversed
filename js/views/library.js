@@ -61,12 +61,20 @@ async function pasteToImport() {
 // The top of the Library: one obvious next step. "Continue" is the lesson you opened last
 // and haven't finished; "Up next" is an unfinished lesson at a good level for you (the
 // one you know most of among 85–95%, else the easiest). '' when there's nothing to suggest.
+// The lesson to suggest next among these: unfinished, at a good level for you (the one you
+// know most of among 85–95%, else the easiest). -> {l, lvl} | undefined
+function pickNext(lessons) {
+  const rest = lessons.filter((l) => !l.completed).map((l) => ({ l, lvl: lessonLevel(l.words) }));
+  const pick = (cls) => rest.filter((x) => x.lvl.cls === cls).sort((a, b) => b.lvl.pct - a.lvl.pct)[0];
+  return pick('good') || pick('easy') || rest.sort((a, b) => b.lvl.pct - a.lvl.pct)[0];
+}
+// The end-of-lesson summary's "Next" button. -> a lesson or null
+export const nextLessonAfter = (lessons, currentId) => pickNext(lessons.filter((l) => l.id !== currentId))?.l || null;
+
 export function continueCard(lessons) {
   const open = lessons.filter((l) => !l.completed);
   const last = open.filter((l) => l.openedAt).sort((a, b) => b.openedAt - a.openedAt)[0];
-  const rest = open.filter((l) => l !== last).map((l) => ({ l, lvl: lessonLevel(l.words) }));
-  const pick = (cls) => rest.filter((x) => x.lvl.cls === cls).sort((a, b) => b.lvl.pct - a.lvl.pct)[0];
-  const next = pick('good') || pick('easy') || rest.sort((a, b) => b.lvl.pct - a.lvl.pct)[0];
+  const next = pickNext(open.filter((l) => l !== last));
   if (!last && !next) return '';
   const pct = last ? lessonProgress(last) : 0;
   return `<div class="card continue">

@@ -10,7 +10,7 @@ import {
   state, statusOf, setStatusMany, applyEvents, undoAuto, markSeen, bumpActivity, removeLessonFromPool, updateLessonLine,
   saveSettings, tts, utterance, esc, toast, plural, startStudyTimer, activityByDay, dayKey, getWord,
 } from '../state.js';
-import { lessonLevel } from './library.js';
+import { lessonLevel, nextLessonAfter } from './library.js';
 import { milestoneBarHtml } from '../progress.js';
 import { tokenize, formatTime, sentenceAt, contextAt } from '../text.js';
 import { translateSentence, ERROR_TEXT } from '../ai.js';
@@ -88,11 +88,11 @@ export async function renderReader(view, id) {
       <button class="btn small" data-ctl="replay" title="Replay line (R)">⟲</button>
       <button class="btn small primary" data-ctl="toggle" title="Play / pause (Space)">⏯</button>
       <button class="btn small" data-ctl="next" title="Next line (→)">⏭</button>
-      <label class="small follow-toggle"><input type="checkbox" id="follow" ${S.follow ? 'checked' : ''}> Follow</label>
-      <button class="btn small" data-ctl="size" title="Player size: normal → large → theater">⤢</button>
       <button class="btn small" data-ctl="more" aria-expanded="false" title="More">⋯</button>
-      <button class="btn small" data-ctl="resume" id="resume" hidden></button>
       <div class="follow-more" id="follow-more" hidden>
+        <label class="small follow-toggle"><input type="checkbox" id="follow" ${S.follow ? 'checked' : ''}> Scroll with the video</label>
+        <button class="btn small" data-ctl="size" title="Player size: normal → large → theater">⤢ Player size</button>
+        <button class="btn small" data-ctl="restart" title="Play the video from the beginning">↺ Start over</button>
         <span class="sync small" title="Shift the text if it runs ahead of or behind the audio">Text timing
           <button class="btn small" data-ctl="sync-" aria-label="Text earlier">−</button>
           <span id="sync-val">${(lesson.syncOffset || 0).toFixed(2)}s</span>
@@ -165,7 +165,9 @@ export async function renderReader(view, id) {
 
   // ---------- media ----------
   const mediaBox = $('#media');
-  const player = createPlayer(mediaBox, { youtubeId: lesson.youtubeId, blob: media?.blob, type: media?.type });
+  // A video opens where you stopped (no autoplay): its first Play continues from there.
+  const resumeAt = listen && lesson.lastTime > 5 && !lesson.completed ? lesson.lastTime : 0;
+  const player = createPlayer(mediaBox, { youtubeId: lesson.youtubeId, blob: media?.blob, type: media?.type, start: resumeAt });
   // Reading and listening time count toward the daily goal; this visit's time goes in the summary.
   let visitSecs = 0;
   cleanups.push(startStudyTimer(() => !!player?.isPlaying?.() || !!reading, (s) => { visitSecs += s; }));
@@ -271,7 +273,7 @@ export async function renderReader(view, id) {
       if (listen && !playing) savePosition();
     });
     player.on('ended', () => {
-      if (listen) toast('End of the video.', 6000, { label: 'Finish lesson', onClick: () => $('#next').click() });
+      if (listen && reader.isConnected) $('#next').click(); // the summary, with the next lesson
     });
     cleanups.push(() => { dead = true; cancelAnimationFrame(raf); savePosition(); player.destroy(); });
   }
@@ -344,13 +346,12 @@ export async function renderReader(view, id) {
       else if (name === 'next') playLine(activePos < 0 ? 0 : cur + 1);
       else if (name === 'replay') playLine(cur);
       else if (name === 'toggle') player.isPlaying() ? player.pause() : player.play();
-      else if (name === 'resume') { $('#resume').hidden = true; seekTo(lesson.lastTime); }
+      else if (name === 'restart') seekTo(0);
       else if (name === 'size') {
         const order = ['normal', 'large', 'theater'];
         const next = order[(order.indexOf(S.playerSize) + 1) % order.length];
         saveSettings({ playerSize: next });
         applySize();
-        toast(`Player: ${next}`, 1500);
         requestAnimationFrame(() => followTo(activeIdx, true));
       }
       else if (name === 'check') runCheck();
@@ -383,12 +384,7 @@ export async function renderReader(view, id) {
     document.addEventListener('keydown', onKey);
     cleanups.push(() => document.removeEventListener('keydown', onKey));
 
-    // Remember where you were; offer to jump back (no autoplay).
-    if (lesson.lastTime > 5) {
-      $('#resume').hidden = false;
-      $('#resume').textContent = `↻ ${formatTime(lesson.lastTime)}`;
-      $('#resume').title = `Resume where you left off (${formatTime(lesson.lastTime)})`;
-    }
+    // Where you were is remembered; the player already opens there (createPlayer `start`).
     const posTimer = setInterval(() => { if (player?.isPlaying()) savePosition(); }, SAVE_POS_MS);
     cleanups.push(() => clearInterval(posTimer));
   }
@@ -428,8 +424,7 @@ export async function renderReader(view, id) {
       }).join('');
       const tools = `<span class="line-tools">
         <button class="tr-btn" data-explain="${i}" title="Explain this line" aria-label="Explain this line">💬</button>
-        <button class="tr-btn" data-tr="${i}" title="Translate this line" aria-label="Translate this line">⇄</button>
-        <button class="tr-btn" data-edit="${i}" title="Correct this line" aria-label="Correct this line">✎</button></span>`;
+        <button class="tr-btn" data-tr="${i}" title="Translate this line" aria-label="Translate this line">⇄</button></span>`;
       return `<p class="cue" data-i="${i}" dir="auto">${time}<span class="sent" data-s="0">${words}</span>${tools}</p>`;
     }).join('') || '<p class="muted">This lesson is empty.</p>';
     markPhrases();
@@ -602,7 +597,7 @@ export async function renderReader(view, id) {
   function nextUnit() {
     if (listen && unitHeard) onSegmentPassed(Number(units()[unit].dataset.i));
     if (unit < units().length - 1) return showUnit(unit + 1, { play: listen });
-    if (listen) return toast('That was the last line.', 4000, { label: 'Finish lesson', onClick: () => $('#next').click() });
+    if (listen) return $('#next').click(); // the last line: the summary, with the next lesson
     $('#next').click(); // the next page (counted as read), or the end of the lesson
   }
   function prevUnit() {
@@ -674,6 +669,7 @@ export async function renderReader(view, id) {
       context: sentence, mark, around, flag, transcript: transcriptText(),
       onFlag: flag ? null : () => flagRanges(rangesOf(spans)),
       onChange: refresh, onClose: onPanelClose,
+      compact: listen, onEdit: () => editLine(i),
     });
     if (listen) requestAnimationFrame(() => followTo(activeIdx, true));
     else requestAnimationFrame(() => keepAbovePanel(spans[spans.length - 1]));
@@ -822,6 +818,8 @@ export async function renderReader(view, id) {
   function editLine(i) {
     const p = reader.querySelector(`p[data-i="${i}"]`);
     if (!p || p.querySelector('.line-edit')) return;
+    pausedForLookup = false; // closing the panel to edit must not restart the video
+    readPausedAt = null;
     closePanel();
     if (listen && player?.isPlaying()) player.pause();
     p.innerHTML = `<span class="line-edit">
@@ -939,7 +937,17 @@ export async function renderReader(view, id) {
   const transcriptText = () => lesson.segments.map((s) => s.text).join('\n');
   reader.addEventListener('mouseup', () => setTimeout(onSelect, 0));
   let selTimer;
-  const onSelChange = () => { clearTimeout(selTimer); selTimer = setTimeout(onSelect, 700); };
+  const onSelChange = () => {
+    clearTimeout(selTimer);
+    // Selecting a phrase while the video plays: stop it now, so the line doesn't move under the
+    // finger; closing the phrase's panel resumes it as after any lookup.
+    const sel = window.getSelection();
+    if (listen && player?.isPlaying() && sel && !sel.isCollapsed && reader.contains(sel.anchorNode)) {
+      pausedForLookup = true;
+      player.pause();
+    }
+    selTimer = setTimeout(onSelect, 700);
+  };
   if (matchMedia('(pointer: coarse)').matches) {
     document.addEventListener('selectionchange', onSelChange);
     cleanups.push(() => { clearTimeout(selTimer); document.removeEventListener('selectionchange', onSelChange); });
@@ -987,6 +995,8 @@ export async function renderReader(view, id) {
     const goal = S.dailyMinutes;
     const todayMins = Math.floor(((await activityByDay()).get(dayKey())?.secs || 0) / 60);
     const goalPct = Math.min(100, Math.round((todayMins / goal) * 100));
+    // One tap to keep going: the next lesson at a good level is the main button.
+    const next = nextLessonAfter(await db.byLang('lessons', lesson.lang), lesson.id);
     reader.innerHTML = `
       <div class="card lesson-done">
         <p class="done-title">🎉 Lesson complete</p>
@@ -1001,9 +1011,10 @@ export async function renderReader(view, id) {
         <div class="row spread small"><span>Today’s goal${goalPct >= 100 ? ' ✓' : ''}</span><span class="muted">${todayMins} / ${goal} minutes</span></div>
         <div class="goal" role="img" aria-label="${goalPct}% of daily goal"><div style="width:${goalPct}%"></div></div>
         <div class="row" style="justify-content:center;margin-top:12px">
-          ${learning ? `<a class="btn primary" href="#/review">Review ${plural(learning, 'LingQ')}</a>` : ''}
-          <button class="btn ${learning ? '' : 'primary'}" id="again" title="Meeting the same words again helps them stick">${listen ? 'Listen again' : 'Read again'}</button>
-          <a class="btn" href="#/library">Library</a>
+          ${next ? `<a class="btn primary next-lesson" href="#/lesson/${next.id}" dir="auto">Next: ${esc(next.title)}</a>` : ''}
+          ${learning ? `<a class="btn ${next ? '' : 'primary'}" href="#/review">Review ${plural(learning, 'LingQ')}</a>` : ''}
+          <button class="btn ${learning || next ? '' : 'primary'}" id="again" title="Meeting the same words again helps them stick">${listen ? 'Listen again' : 'Read again'}</button>
+          ${next ? '' : '<a class="btn" href="#/library">Library</a>'}
         </div>
       </div>`;
     view.querySelector('.pager, .follow-bar').hidden = true;
@@ -1012,6 +1023,7 @@ export async function renderReader(view, id) {
 
   $('#next').addEventListener('click', async () => {
     closePanel();
+    const wasReading = !!reading; // read-aloud carries on to the next page
     stopReading();
     if (listen) {
       // Listening already counted line by line; finishing never bulk-promotes.
@@ -1039,6 +1051,7 @@ export async function renderReader(view, id) {
       await db.put('lessons', lesson);
       renderPage();
       window.scrollTo(0, 0);
+      if (wasReading) readAloud(0);
       if (msg) toast(msg, undoable ? 6000 : 3000, undoable ? undoAction : null);
     } else {
       lesson.completed = true;

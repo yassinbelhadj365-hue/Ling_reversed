@@ -521,7 +521,7 @@ try {
   ok(comidaW().status === 1 && comidaW().senses.length === 2 && comidaW().hint === 'cuisine' && comidaW().context === 'La comida española es muy rica.',
     'a new meaning makes the word a fresh LingQ 1 for that meaning');
   ok([...D().querySelectorAll('#reader .w[data-n="comida"]')].every((s) => s.classList.contains('st-1')), 'the reader shows it as LingQ 1');
-  D().querySelector('#toast .toast-action').click();
+  D().querySelector('#word-panel .new-sense [data-act="undo-sense"]').click(); // Undo sits in the panel's notice
   await until(() => comidaW().status === 2);
   ok(comidaW().status === 2 && comidaW().senses.length === 1 && comidaW().hint === 'food', 'Undo puts the word back as it was');
   aiAnswer = null;
@@ -682,6 +682,13 @@ try {
   W().open = realOpen;
   D().querySelector('#word-panel [data-act="close"]').click();
   ok(fake.playing, 'closing the panel resumes it');
+  D().querySelector('#reader p[data-i="25"] .w').click();
+  await until(() => !D().getElementById('word-panel').hidden && !fake.playing);
+  const compactPanel = !D().querySelector('#word-panel .ctx-sentence') && !!D().querySelector('#word-panel .status-row [data-s="-1"]');
+  D().querySelector('#reader p[data-i="25"]').click(); // a tap beside the words, not on one
+  await until(() => D().getElementById('word-panel').hidden);
+  ok(compactPanel && D().getElementById('word-panel').hidden && fake.playing,
+    'with a video, the panel skips the sentence shown just above and has Ignore beside the levels; a tap outside closes it and the video goes on');
 
   // explain a whole line (sentence mode)
   aiAnswer = (req) => { aiReq = req; return answer('Es la frase número treinta.'); };
@@ -751,7 +758,10 @@ try {
   const videoId = W().location.hash.split('/').pop();
   const before = await db.get('lessons', videoId);
   const largoBefore = before.words['largo'];
-  D().querySelector('#reader [data-edit="39"]').click();
+  D().querySelector('#reader p[data-i="39"] .w').click(); // ✎ is in the word panel's More
+  await until(() => !D().getElementById('word-panel').hidden && D().querySelector('#word-panel .panel-word')?.textContent === 'esta' && D().querySelector('#word-panel [data-act="edit-line"]'));
+  ok(!D().querySelector('#reader [data-edit]'), 'no ✎ beside each line to mis-tap: correcting a line is in the word panel');
+  D().querySelector('#word-panel [data-act="edit-line"]').click();
   const ta39 = await until(() => D().querySelector('#reader p[data-i="39"] textarea'));
   ta39.value = 'Esta es la frase número 39 del vídeo corto.';
   D().querySelector('#reader p[data-i="39"] [data-save]').click();
@@ -761,6 +771,24 @@ try {
   ok(after.segments[39].text.endsWith('vídeo corto.') && after.words['corto'] === 1 && after.words['largo'] === largoBefore - 1,
     'edited line saved and lesson word counts updated');
   ok(corto?.freq === 1 && corto.lessons.includes(after.id) && corto.status === 0, 'a word introduced by the correction joins the pool as new');
+
+  // ---- a video opens where you stopped; its end shows the summary with the next lesson ----
+  const atL = await db.get('lessons', videoId);
+  Object.assign(atL, { lastTime: 61, completed: false });
+  await db.put('lessons', atL);
+  W().location.hash = '#/library';
+  await until(() => D().querySelector('.lesson-card'));
+  W().location.hash = `#/lesson/${videoId}`;
+  await until(() => V().classList.contains('listen') && D().querySelector('#reader .w'));
+  ok(fake.media?.start === 61 && !D().querySelector('[data-ctl="resume"]'), 'a video opens where you stopped, with nothing to tap: ' + fake.media?.start);
+  (fake.handlers.ended || []).forEach((fn) => fn());
+  await until(() => /Lesson complete/.test(D().getElementById('reader').textContent));
+  ok(/^Next: /.test(D().querySelector('#reader .next-lesson')?.textContent || ''),
+    'when the video ends the summary opens by itself, its main button the next lesson: ' + D().querySelector('#reader .next-lesson')?.textContent);
+  W().location.hash = '#/library';
+  await until(() => D().querySelector('.lesson-card'));
+  W().location.hash = `#/lesson/${videoId}`;
+  await until(() => V().classList.contains('listen') && D().querySelector('#reader p[data-i="2"] .w'));
 
   // ---- transcript check against the audio (audio + Whisper stubbed) ----
   const wavSilence = (() => {
