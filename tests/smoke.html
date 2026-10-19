@@ -179,17 +179,21 @@ try {
     && busyAsked.join() === 'gemini-3.6-flash,gemini-3.6-flash,gemini-3.6-flash-lite,gemma-4-26b-a4b-it'
     && !gemmaBody.systemInstruction && !gemmaBody.generationConfig.responseMimeType && /"translation":""/.test(gemmaBody.contents[0].parts[0].text),
     'when Google is busy: one retry, the next Flash model, then Gemma with the JSON shape in the prompt: ' + busyAsked);
-  // Every Google model busy: the user's Mistral backup answers; videos never go to a backup.
-  const savedKeys = await Promise.all(['secret:gemini', 'secret:mistral', 'secret:groq'].map((k) => db.getSetting(k, '')));
+  // Every Google model busy: the backups answer in order (Groq busy too, so Cohere); videos never go to a backup.
+  const KEYROWS = ['secret:gemini', 'secret:groq', 'secret:cohere', 'secret:mistral'];
+  const savedKeys = await Promise.all(KEYROWS.map((k) => db.getSetting(k, '')));
   await db.setSetting('secret:gemini', 'k');
+  await db.setSetting('secret:groq', 'gk');
+  await db.setSetting('secret:cohere', 'ck');
   await db.setSetting('secret:mistral', 'mk');
-  await db.setSetting('secret:groq', '');
-  let mistralReq = null;
+  let backupReq = null, groqAsked = false, mistralAsked = false;
   window.fetch = async (url, opts) => {
     const u = String(url);
     if (/\/models\?/.test(u)) return new Response(JSON.stringify(googleList));
-    if (/api\.mistral\.ai/.test(u)) {
-      mistralReq = { auth: opts.headers.Authorization, body: JSON.parse(opts.body) };
+    if (/api\.groq\.com/.test(u)) { groqAsked = true; return busy(); }
+    if (/api\.mistral\.ai/.test(u)) mistralAsked = true;
+    if (/api\.cohere\.ai/.test(u)) {
+      backupReq = { auth: opts.headers.Authorization, body: JSON.parse(opts.body) };
       return new Response(JSON.stringify({ choices: [{ message: { content: '{"translation":"m"}' } }] }));
     }
     return busy();
@@ -198,14 +202,14 @@ try {
   const mb = await geminiJson({ system: 'sys', user: 'u', schema: { type: 'OBJECT', properties: { translation: { type: 'STRING' } } } });
   let videoErr = '';
   try { await geminiJson({ system: 's', user: 'u', video: { url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ' } }); } catch (e) { videoErr = e.message; }
-  ok(mb.model === 'mistral-small-latest' && mb.result.translation === 'm' && mistralReq.auth === 'Bearer mk'
-    && mistralReq.body.response_format.type === 'json_object' && /Reply with JSON only/.test(mistralReq.body.messages[0].content)
-    && /busy/i.test(videoErr), 'when every Google model is busy, the Mistral backup answers; a video gets Google’s busy error: ' + videoErr);
+  ok(mb.model === 'command-a-03-2025' && mb.result.translation === 'm' && backupReq.auth === 'Bearer ck' && groqAsked && !mistralAsked
+    && backupReq.body.response_format.type === 'json_object' && /Reply with JSON only/.test(backupReq.body.messages[0].content)
+    && /busy/i.test(videoErr), 'when every Google model and Groq are busy, Cohere answers (Mistral isn’t needed); a video gets Google’s busy error: ' + videoErr);
   await db.setSetting('secret:gemini', '');
   ok((await hasProvider()) && !(await hasProvider({ video: true })), 'a backup key alone is enough for lookups, not for videos');
   ok(keyKind(' AIzaSyD-abcdefghijklmnopqrstuvwxyz0123 ') === 'gemini' && keyKind('gsk_' + 'x'.repeat(40)) === 'groq'
-    && keyKind('aB3'.repeat(10) + 'zz') === 'mistral' && keyKind('hello there') === null, 'a pasted key is recognized by its look');
-  await Promise.all(['secret:gemini', 'secret:mistral', 'secret:groq'].map((k, i) => db.setSetting(k, savedKeys[i])));
+    && keyKind('aB3'.repeat(10) + 'zz') === 'mistral' && keyKind('Qw7'.repeat(13) + 'x') === 'cohere' && keyKind('hello there') === null, 'a pasted key is recognized by its look');
+  await Promise.all(KEYROWS.map((k, i) => db.setSetting(k, savedKeys[i])));
   window.fetch = realFetchU;
   delete window.__lingoBusyWait;
   _resetModels();
@@ -1150,9 +1154,9 @@ try {
   W().location.hash = '#/settings/ai';
   await until(() => D().querySelector('#ai-card [data-key="groq"]'));
   const rows = [...D().querySelectorAll('#ai-card .ai-row[data-p]')].map((r) => r.dataset.p);
-  ok(rows.join() === 'gemini,mistral,groq' && D().querySelector('#key-paste')
-    && D().querySelector('[data-get="mistral"]').href.startsWith('https://console.mistral.ai/'),
-    'Settings → AI: Gemini, Mistral and Groq, each with a key link, plus one Paste button: ' + rows);
+  ok(rows.join() === 'gemini,groq,cohere,mistral' && D().querySelector('#key-paste')
+    && D().querySelector('[data-get="cohere"]').href.startsWith('https://dashboard.cohere.com/'),
+    'Settings → AI: Gemini, Groq, Cohere and Mistral, each with a key link, plus one Paste button: ' + rows);
   const frameFetch = W().fetch;
   let groqAuth = '';
   W().fetch = async (url, opts) => {

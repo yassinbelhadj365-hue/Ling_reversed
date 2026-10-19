@@ -4,7 +4,7 @@
 //      (kv `secret:gemini`, never synced or backed up), called directly.
 //   2. The shared key of the sync server's `ai` Edge Function
 //      (supabase/functions/ai/index.ts), for signed-in users with no key of their own.
-// When Gemini is busy or used up, the user's optional free Mistral or Groq key answers instead
+// When Gemini is busy or used up, the user's optional free Groq or Cohere key answers instead
 // (BACKUPS). Free-tier models only; nothing here can spend money.
 import * as db from './db.js';
 import { state, langName } from './state.js';
@@ -20,11 +20,11 @@ const isGemma = (id) => /^gemma-/.test(id);
 const CACHE_DAYS = 60;
 
 // Each provider's key is kept on this device (kv `secret:<provider>`) and, unless the user
-// turns it off, copied to the synced kv row `aikeys` ({on, gemini, mistral, groq}) so the other
+// turns it off, copied to the synced kv row `aikeys` ({on, gemini, groq, cohere, mistral}) so the other
 // devices of the same account get it (the owner chose this: the app is for family and friends).
 // `aikeys` never goes into backup files. A key typed on this device wins.
 const SYNCED_KEYS = 'aikeys';
-const KEY_IDS = ['gemini', 'mistral', 'groq'];
+const KEY_IDS = ['gemini', 'groq', 'cohere', 'mistral'];
 const syncedKeys = () => db.getSetting(SYNCED_KEYS, null);
 export async function getProviderKey(id) {
   const own = await db.getSetting(`secret:${id}`, '');
@@ -131,7 +131,7 @@ async function modelsToTry(key, req = {}) {
 }
 
 function errorText(status, msg = '') {
-  if (isBusy(status)) return 'Google’s AI is busy right now (many people are using it). Try again in a minute, or add a free Mistral or Groq key in Settings as a backup.';
+  if (isBusy(status)) return 'Google’s AI is busy right now (many people are using it). Try again in a minute, or add a free backup AI (Groq) in Settings.';
   if (status === 429) return 'Today’s free AI limit is used up (or too many taps in a minute). Wait a little, or add your own free key in Settings.';
   if (status === 400 && /API key/i.test(msg)) return 'Google rejected the AI key. Check it in Settings.';
   if (status === 401 || status === 403) return 'Google rejected the AI key. Check it in Settings.';
@@ -260,13 +260,17 @@ async function shared(req) {
 const canShare = () => { const a = activeAccount(); return !!(cloudConfig() && a && isSignedIn(a)); };
 
 // ---------- backups: other free AIs with the user's own key ----------
-// Both have a free tier without a card, accept calls from a browser and speak the OpenAI
-// chat format. They can't watch videos. Keys stay on this device like the Gemini one.
+// Tried in this order. All accept calls from a browser and speak the OpenAI chat format; none
+// can watch videos. Groq and Cohere (trial key, about 1,000 calls a month) are free without a
+// card. Mistral stopped giving new accounts free API keys in October 2026, so it comes last,
+// for accounts that still have one.
 export const BACKUPS = [
-  { id: 'mistral', name: 'Mistral', url: 'https://api.mistral.ai/v1/chat/completions', model: 'mistral-small-latest',
-    keyUrl: 'https://console.mistral.ai/api-keys' },
   { id: 'groq', name: 'Groq', url: 'https://api.groq.com/openai/v1/chat/completions', model: 'openai/gpt-oss-120b',
     extra: { reasoning_effort: 'low' }, keyUrl: 'https://console.groq.com/keys' },
+  { id: 'cohere', name: 'Cohere', url: 'https://api.cohere.ai/compatibility/v1/chat/completions', model: 'command-a-03-2025',
+    keyUrl: 'https://dashboard.cohere.com/api-keys' },
+  { id: 'mistral', name: 'Mistral', url: 'https://api.mistral.ai/v1/chat/completions', model: 'mistral-small-latest',
+    keyUrl: 'https://console.mistral.ai/api-keys' },
 ];
 const backupsWithKeys = async () =>
   (await Promise.all(BACKUPS.map(async (p) => ({ p, key: await getProviderKey(p.id) })))).filter((b) => b.key);
@@ -309,6 +313,7 @@ export function keyKind(text) {
   const k = String(text || '').trim();
   if (/^AIza[\w-]{30,}$/.test(k)) return 'gemini';
   if (/^gsk_\w{20,}$/.test(k)) return 'groq';
+  if (/^[A-Za-z0-9]{40}$/.test(k)) return 'cohere';
   if (/^[A-Za-z0-9]{32}$/.test(k)) return 'mistral';
   return null;
 }
@@ -400,7 +405,7 @@ export async function translateSentence(text, from, to) {
 
 export const ERROR_TEXT = {
   quota: 'Today’s free AI limit is used up. Try again later, or add your own free key in Settings.',
-  busy: 'Google’s AI is busy right now. Try again in a minute, or add a free Mistral or Groq key in Settings as a backup.',
+  busy: 'Google’s AI is busy right now. Try again in a minute, or add a free backup AI (Groq) in Settings.',
   unavailable: 'Translation unavailable right now (offline?).',
   none: 'No AI is set up yet: add a free Gemini key in Settings, or log in to your account.',
 };

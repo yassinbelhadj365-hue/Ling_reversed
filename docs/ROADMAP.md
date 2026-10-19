@@ -77,8 +77,9 @@ this file records where things stand, what the owner decided, and what's next.
   Gemini can transcribe videos through it. Then try a real French video on the iPhone and check
   the timestamps line up with the speech.
 - Redeploy the shared `ai` function (2026-10-19 `index.ts`) so it also survives busy Gemini.
-- Optional: free Mistral (console.mistral.ai) and/or Groq (console.groq.com) keys in Settings.
-  Their French translation quality, and Gemma's, has **not** been compared with Gemini yet.
+- Optional: free Groq (console.groq.com) and Cohere (dashboard.cohere.com) keys in Settings → AI.
+  Mistral no longer gives new accounts free API keys (owner hit this, 2026-10-19).
+  Their French translation quality (and Gemma's, Mistral's) has **not** been compared with Gemini yet.
 - Optional: the `transcript` Edge Function (cloud helper) so pasting a link works on iPhone.
 - Optional, Android only: signing key secrets so APK updates keep data (docs/MOBILE.md).
 

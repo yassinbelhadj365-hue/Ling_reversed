@@ -158,25 +158,28 @@ export async function renderSettings(view, arg) {
   return () => { stopAi(); if ('speechSynthesis' in window) speechSynthesis.removeEventListener('voiceschanged', fillVoices); };
 }
 
-// ---------- the AI card: Gemini, then the Mistral and Groq backups, then the shared server ----------
+// ---------- the AI card: Gemini, then the backups (Groq, Cohere, Mistral), then the shared server ----------
 // Getting a key is: tap "Get a free key", copy it on that site, come back, tap "Paste a key".
 // The app tells from the key's look which AI it belongs to, saves it and checks it at once.
 
 const STEPS = {
   gemini: ['Sign in with your Google account.', 'Tap <b>Create API key</b> (any project is fine).', 'Copy the key (it starts with <b>AIza</b>).'],
-  mistral: ['Sign up or sign in (a Google account works).', 'Choose the free <b>Experiment</b> plan; it may ask to verify your phone number.',
+  cohere: ['Sign up or sign in (a Google account works).', 'A free <b>Trial key</b> is already made for you on the API keys page.',
+    'Copy it (tap the copy icon next to it).'],
+  mistral: ['Only if your Mistral account still lets you create keys for free: since October 2026 new accounts usually have to pay first.',
     'Tap <b>Create new key</b> and copy it.'],
   groq: ['Sign in (a Google account works).', 'Tap <b>Create API Key</b> and give it any name.', 'Copy the key (it starts with <b>gsk_</b>).'],
 };
-const ROLE = { gemini: 'main AI', mistral: 'answers when Google is busy', groq: 'second backup' };
+const ROLE = { gemini: 'main AI', groq: 'answers when Google is busy', cohere: 'second backup (about 1,000 answers a month)',
+  mistral: 'optional: no longer free for new accounts' };
 const providerName = (id) => PROVIDERS.find((p) => p.id === id)?.name || id;
 
 function aiCardHtml(s) {
   return `
     <div class="card" id="ai-card">
       <h2 style="margin-top:0">AI for translations</h2>
-      <p class="small muted">Each tap asks a free AI what the word means in its sentence. Gemini answers first; Mistral and Groq
-        answer when Google is busy. All three are free with no card and take about a minute each.</p>
+      <p class="small muted">Each tap asks a free AI what the word means in its sentence. Gemini answers first; Groq and Cohere
+        answer when Google is busy. They are free with no card and take about a minute each.</p>
       <div class="row"><button class="btn primary" id="key-paste">📋 Paste a key</button>
         <span class="small muted" id="key-paste-st">Copied a key? Tap here: the app sees which AI it’s for and checks it.</span></div>
       ${PROVIDERS.map((p, i) => `
@@ -281,11 +284,11 @@ function initAiCard(view, arg) {
     if (!clip) { st.textContent = 'Couldn’t read the clipboard: long-press a key box below and choose Paste.'; return; }
     // A key of an unknown shape is accepted for the provider whose page was just opened.
     const kind = keyKind(clip) || (waiting && clip.length >= 20 && !/\s/.test(clip) ? waiting : null);
-    if (!kind) { st.textContent = 'The copied text doesn’t look like a Gemini, Mistral or Groq key. Copy the key itself and try again.'; return; }
+    if (!kind) { st.textContent = 'The copied text doesn’t look like a Gemini, Groq, Cohere or Mistral key. Copy the key itself and try again.'; return; }
     $('#key-paste').classList.remove('pulse');
     st.textContent = `${providerName(kind)} key found. Checking it…`;
     await save(clip, kind);
-    st.textContent = `${providerName(kind)} key saved.${kind === 'gemini' ? ' Want a backup for busy times? Get a Mistral key next.' : ''}`;
+    st.textContent = `${providerName(kind)} key saved.${kind === 'gemini' ? ' Want a backup for busy times? Get a Groq key next.' : ''}`;
     waiting = null;
   });
 
