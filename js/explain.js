@@ -12,7 +12,9 @@ const DEEP_CONTEXT_CHARS = 30000;  // "More detail": a large part of the transcr
 
 const S = { type: 'STRING' };
 const LIST = { type: 'ARRAY', items: S };
-const object = (properties) => ({ type: 'OBJECT', properties, required: Object.keys(properties) });
+// propertyOrdering: Gemini writes the fields in this order (alphabetical otherwise), so the
+// sentence is translated before the word's meaning and highlight are chosen from it.
+const object = (properties) => ({ type: 'OBJECT', properties, required: Object.keys(properties), propertyOrdering: Object.keys(properties) });
 // The tap asks only for what the panel shows at once, so the answer is short and quick.
 const QUICK = {
   translation: S, highlight: S, meaning_native: S, meaning_target: S,

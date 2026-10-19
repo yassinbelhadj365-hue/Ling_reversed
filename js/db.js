@@ -90,8 +90,9 @@ function migrateToV2(tx) {
 
 function open() {
   if (!dbPromise) {
+    const name = dbName; // this connection's database (useDatabase can switch accounts later)
     dbPromise = new Promise((resolve, reject) => {
-      const req = indexedDB.open(dbName, DB_VERSION);
+      const req = indexedDB.open(name, DB_VERSION);
       req.onupgradeneeded = (e) => {
         const db = req.result;
         if (e.oldVersion < 1) {
@@ -107,7 +108,21 @@ function open() {
           if (e.oldVersion >= 1) migrateToV2(req.transaction);
         }
       };
-      req.onsuccess = () => resolve(req.result);
+      req.onsuccess = () => {
+        const db = req.result;
+        // A newer version of the app (opened elsewhere, or after an update) needs to upgrade the
+        // database: step aside instead of blocking it, and reload into the new version.
+        // (A deletion, newVersion null, only closes it.)
+        db.onversionchange = (e) => {
+          db.close();
+          if (dbPromise && dbName === name) dbPromise = null;
+          if (e.newVersion) location.reload();
+        };
+        resolve(db);
+      };
+      // An older copy left open (iPhones keep suspended web apps alive) is holding the database:
+      // say so instead of waiting silently.
+      req.onblocked = () => document.dispatchEvent(new CustomEvent('lingo-db-blocked'));
       req.onerror = () => reject(req.error);
     });
   }

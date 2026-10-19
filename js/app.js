@@ -33,6 +33,8 @@ let cleanup = null;
 // a redraw of the same screen (after a sync) keeps its place. Lessons place themselves.
 const scrolls = new Map(); // hash -> scrollY
 let shownHash = null;
+let routeRun = 0; // the newest route() call
+let renderedRun = 0; // the newest one that finished
 
 async function route() {
   cleanup?.();
@@ -49,13 +51,24 @@ async function route() {
   langSelect.value = lang();
 
   const hash = location.hash;
+  // Two renders can overlap (a sync redraws the Library while you open a lesson): only the
+  // newest one counts; an older one that finishes later cleans up after itself (players, timers).
+  const run = ++routeRun;
   view.innerHTML = '';
+  let done = null;
   try {
-    cleanup = (await render(view, arg)) || null;
+    done = (await render(view, arg)) || null;
   } catch (err) {
     console.error(err);
-    view.innerHTML = `<div class="empty">Something went wrong: ${String(err.message || err)}</div>`;
+    if (run === routeRun) view.innerHTML = `<div class="empty">Something went wrong: ${String(err.message || err)}</div>`;
   }
+  if (run !== routeRun) {
+    done?.();
+    if (renderedRun === routeRun) route(); // it drew over the newer screen: draw that again
+    return;
+  }
+  renderedRun = run;
+  cleanup = done;
   if (name !== 'lesson' && location.hash === hash && !arg) window.scrollTo(0, scrolls.get(hash) || 0);
   showDueCount();
 }
@@ -104,6 +117,7 @@ function takeShareTarget() {
 }
 
 async function init() {
+  document.addEventListener('lingo-db-blocked', () => toast('Close Lingo Reader in your other tabs or windows to finish updating.', 10000));
   takeShareTarget();
   measureChrome();
   window.addEventListener('resize', measureChrome);
@@ -148,6 +162,9 @@ async function init() {
     navigator.serviceWorker.register('sw.js').catch(() => { /* offline mode unavailable */ });
   }
   warmUp().catch(() => {}); // the first word tap shouldn't wait for setup
+  // Installed on the home screen: ask the system to keep this app's data even when storage runs
+  // low (iOS honours it; browsers in a tab may show a prompt, so only here).
+  if (matchMedia('(display-mode: standalone)').matches || navigator.standalone) navigator.storage?.persist?.().catch(() => {});
   db.onChange((store) => { if (store === 'words') showDueCountSoon(); });
   setInterval(showDueCount, 60_000); // cards become due as time passes
   document.body.dataset.ready = '1';

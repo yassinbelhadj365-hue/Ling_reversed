@@ -117,6 +117,32 @@ this file records where things stand, what the owner decided, and what's next.
 - Optional: the `transcript` Edge Function (cloud helper) so pasting a link works on iPhone.
 - Optional, Android only: signing key secrets so APK updates keep data (docs/MOBILE.md).
 
+## Research of 2026-10-20 (12 agents), not built yet — for the owner to choose from
+
+Strongest first (evidence in brackets):
+- **Level labels by kind:** text needs ~98% known words, video ~90–95% (Hu & Nation 2000;
+  van Zeeland & Schmitt 2013); `lessonLevel` uses 95/85 for both.
+- **Up next favours your LingQs:** rank good-level lessons by how often your LingQs occur in
+  them, so they get their encounters sooner (Uchihara et al. 2019 meta-analysis; narrow viewing).
+- **Speed button** in listen mode (`player.setRate` exists, unused) (Zhao 1997; every competitor).
+- **Reading feeds the review schedule:** a lookup of a LingQ makes its card due; clean passes count
+  as a light review; review order by recall chance × frequency. FSRS port later if backlogs grow.
+- **Saved phrases get read/listen passes** like words (Webb, Newton & Chang 2013).
+- **Simplify this lesson** (LingQ 5): an easier companion text for a Challenging video transcript.
+- **French details:** form and gender from the offline dictionary ("mangeons → manger · nous,
+  present", "maison (f.)"); spoken contractions (y'a, t'es, j'sais); homophone caption fixes.
+- **Accessibility:** level 4 nearly invisible (1.07:1 against white); text-size setting;
+  dialog focus for the panel; reduced motion.
+- **Find videos shelf:** checked channels (Easy French, Alice Ayel, French Comprehensible Input) via
+  their public RSS through a small Edge Function; known-% before import when captions are reachable.
+- Also: pause after every line; stories use each target 3×; "Hear it elsewhere" (YouGlish widget,
+  terms unclear); shadowing with the mic (medium, iPhone-dependent); backup nudge for the
+  device-only profile; AI cache key without the senses hash (saves quota).
+- **Already fixed from this research:** double import, overlapping route renders, review saving a
+  stale word over a synced edit, slow-launch cache mixing, video-mode lookups running after
+  leaving, Known/Ignore closing the next word's panel, story jumping after leaving Import,
+  database blocked by an old copy, storage persistence request, AI answer field order.
+
 ## Next: the owner's chosen direction ("think like LingQ's owner")
 
 Content at the right level that's easy to get is the main gap; the habit side is covered.

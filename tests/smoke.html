@@ -367,7 +367,8 @@ try {
   const exc = excerptAround(longT, 'Línea 1500.', 300);
   ok(exc.length <= 302 && exc.includes('Línea 1500.'), 'excerptAround keeps the part of the transcript around the sentence');
   const bp = buildPrompt({ kind: 'word', term: 'casa', sentence: 'Mi casa es tu casa.', transcript: 'Hola. Mi casa es tu casa. Adiós.' });
-  ok(/simple Spanish/.test(bp.system) && !/"examples"/.test(bp.system) && bp.user.includes('Hola. Mi casa') && bp.fast, 'buildPrompt: quick = short Spanish explanation, no examples, transcript included');
+  ok(/simple Spanish/.test(bp.system) && !/"examples"/.test(bp.system) && bp.user.includes('Hola. Mi casa') && bp.fast, 'buildPrompt: quick = short Spanish explanation, no examples, transcript included'); 
+  ok(bp.schema.propertyOrdering?.[0] === 'translation' && buildPrompt({ kind: 'word', term: 'casa', sentence: 'x', transcript: '' }, { depth: 'deep' }).schema.propertyOrdering[0] === 'translation', 'the AI translates the sentence before choosing the word’s meaning (field order)');
   const bd = buildPrompt({ kind: 'word', term: 'casa', sentence: 'Mi casa es tu casa.', transcript: '' }, { depth: 'deep' });
   ok(/"examples"/.test(bd.system) && bd.schema.properties.examples && !bd.fast, 'buildPrompt: “More detail” asks for grammar and examples');
 
@@ -859,8 +860,11 @@ try {
   ok(!D().getElementById('yt-track').hidden && D().getElementById('yt-track').options.length === 3 && /^#\/import/.test(W().location.hash),
     'with two sets of Spanish captions, Import waits so another track can be chosen');
   D().getElementById('go').click();
+  D().getElementById('go').click(); // a second tap while the first import runs makes no second lesson
   await until(() => V().classList.contains('listen') && D().querySelector('#reader .w'));
   const autoLesson = await db.get('lessons', W().location.hash.split('/').pop());
+  await sleep(300);
+  ok((await db.byLang('lessons', 'es')).filter((l) => l.title === 'Vídeo automático').length === 1, 'tapping Import twice creates the lesson once');
   ok(autoLesson.segments.length === 1 && autoLesson.segments[0].marks?.length === 5, 'auto-captions became one sentence with word timings');
 
   // ---- 📋 Paste link in the Library: from a copied link straight into its lesson ----

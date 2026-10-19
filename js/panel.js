@@ -100,14 +100,14 @@ async function afterAnswer(me) {
     // Said (with its Undo) in the panel itself, not in a toast on top of the controls.
     if (stillOpen(me)) { me.newSense = res; render(); }
   }
-  await rememberContext();
+  await rememberContext(me);
 }
 
 // LingQs keep the sentence they were met in (and its translation) for flashcards.
-async function rememberContext() {
-  if (!current || current.mode !== 'word') return;
-  const { term, context } = current;
-  const tr = answer()?.translation || '';
+async function rememberContext(me = current) {
+  if (!me || me.mode !== 'word') return;
+  const { term, context } = me;
+  const tr = (me.explain?.state === 'done' && me.explain.result?.translation) || '';
   const w = getWord(term);
   if (!w || !isLearning(w.status) || !context) return;
   if (!w.context) { w.context = context; w.contextTr = tr; await saveWord(w); }
@@ -352,9 +352,11 @@ function assistHtml() {
 // ---------- actions ----------
 
 async function changeStatus(status) {
-  const { term, context } = current;
+  const me = current;
+  const { term, context } = me;
   const w = getWord(term);
   await setStatus(term, status, { context: w?.context || context }, { manual: true });
+  if (!stillOpen(me)) return; // another word was opened meanwhile: leave its panel alone
   afterChange();
   // Known or Ignore: nothing more to learn here, so the panel gets out of the way.
   if (status === KNOWN || status === IGNORED) closePanel();

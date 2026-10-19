@@ -1,6 +1,6 @@
 // Offline support: network-first for the app shell (so updates show up immediately),
 // falling back to the cached copy when offline.
-const CACHE = 'lingo-reader-v9';
+const CACHE = 'lingo-reader-v10';
 const SLOW_MS = 2500; // a page slower than this to load: this launch uses the cache
 const slowClients = new Set(); // pages (clientIds) running on the cache
 const SHELL = [
@@ -30,7 +30,7 @@ self.addEventListener('fetch', (e) => {
   if (url.pathname.includes('/api/')) return; // the local server's live answers (transcripts, audio)
   // no-cache: always ask the server whether a file changed (GitHub Pages lets browsers keep
   // files for 10 minutes otherwise, so phones kept running old code after an update).
-  const network = fetch(e.request, { cache: 'no-cache' }).then((res) => {
+  const fetchAndKeep = () => fetch(e.request, { cache: 'no-cache' }).then((res) => {
     if (res.ok) {
       const copy = res.clone();
       caches.open(CACHE).then((c) => c.put(e.request, copy));
@@ -40,16 +40,22 @@ self.addEventListener('fetch', (e) => {
   const cached = () => caches.match(e.request, { ignoreSearch: true });
   const fallback = () => cached().then((hit) => hit || Response.error());
   // A slow connection doesn't hold the app up: when the page itself takes longer than SLOW_MS,
-  // that launch runs entirely on the saved copies (all files from the same version, never a
-  // mix of old and new). The network answers still refresh the cache for the next launch.
+  // that launch runs entirely on the saved copies, and writes none (so it never leaves a mix
+  // of old and new files behind); the next normal launch refreshes them. A new version is
+  // installed whole (install's addAll), so the cache always holds one complete version.
   if (slowClients.has(e.clientId)) {
-    e.respondWith(cached().then((hit) => hit || network).catch(fallback));
+    e.respondWith(cached().then((hit) => hit || fetch(e.request)).catch(fallback));
     return;
   }
+  const network = fetchAndKeep();
   if (e.request.mode !== 'navigate') {
     e.respondWith(network.catch(fallback));
     return;
   }
+  // Forget pages that are gone, so the list doesn't grow.
+  e.waitUntil(self.clients.matchAll().then((open) => {
+    for (const id of slowClients) if (!open.some((c) => c.id === id)) slowClients.delete(id);
+  }));
   const slow = new Promise((r) => setTimeout(r, SLOW_MS)).then(cached).then((hit) => {
     if (!hit) return network;
     slowClients.add(e.resultingClientId);

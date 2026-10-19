@@ -178,6 +178,7 @@ export async function renderReader(view, id) {
   let stopPrefetch = null;  // stops the background lookups of the previous page (prefetchLines)
   const prefetched = new Set(); // listen mode: lines already looked up
   const PREFETCH_AHEAD = 8;     // listen mode: lines looked up ahead of the spoken one
+  const listenStops = [];       // listen mode: stops for its background lookups, called on leaving
   let activePos = -1;      // its position in the timeline
   let lastT = null;
   let segPlayed = 0;       // seconds of normal playback within the active line
@@ -726,9 +727,10 @@ export async function renderReader(view, id) {
     for (let i = Math.max(0, idx); i < Math.min(lesson.segments.length, idx + PREFETCH_AHEAD); i++) {
       if (!prefetched.has(i)) { prefetched.add(i); next.push(i); }
     }
-    if (next.length) prefetchLines(next);
+    const stop = next.length && prefetchLines(next);
+    if (stop) listenStops.push(stop);
   }
-  cleanups.push(() => stopPrefetch?.());
+  cleanups.push(() => { stopPrefetch?.(); listenStops.forEach((stop) => stop()); });
 
   // Automatic changes made while this lesson is open: term -> {from, to}.
   const session = new Map();

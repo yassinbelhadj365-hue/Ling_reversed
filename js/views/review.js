@@ -1,4 +1,4 @@
-import { state, setStatus, restoreWord, applyReview, bumpActivity, speak, esc, plural, startStudyTimer, toast } from '../state.js';
+import { state, getWord, setStatus, restoreWord, applyReview, bumpActivity, speak, esc, plural, startStudyTimer, toast } from '../state.js';
 import { previewInterval, isLearning, KNOWN, IGNORED } from '../srs.js';
 
 const GRADES = [['again', 'Again'], ['hard', 'Hard'], ['good', 'Good'], ['easy', 'Easy']];
@@ -28,7 +28,7 @@ export async function renderReview(view) {
   }
 
   function draw() {
-    const w = queue[idx];
+    const w = getWord(queue[idx].term) || queue[idx]; // the current copy (a sync may have replaced it)
     if (!w) {
       const all = learning();
       view.innerHTML = `
@@ -77,7 +77,7 @@ export async function renderReview(view) {
 
   // The next card shows at once; the grade is saved in the background.
   function answer(g) {
-    const w = queue[idx];
+    const w = getWord(queue[idx].term) || queue[idx]; // the current copy (a sync may have replaced it)
     applyReview(w, g).catch((err) => toast(`Couldn’t save that grade: ${err.message}`));
     if (g === 'again') queue.push(w); // see it again this session
     next();
@@ -85,7 +85,7 @@ export async function renderReview(view) {
 
   // Known or Ignore takes the word out of review; Undo brings it back as it was.
   function setTo(status) {
-    const w = queue[idx];
+    const w = getWord(queue[idx].term) || queue[idx]; // the current copy (a sync may have replaced it)
     const before = { status: w.status, srs: w.srs, ev: w.ev };
     setStatus(w.term, status, {}, { manual: true }).then(() => bumpActivity({ reviews: 1 }));
     next();

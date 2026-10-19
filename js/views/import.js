@@ -110,7 +110,8 @@ export async function renderImport(view, arg) {
       });
       if (!made) throw new Error('The AI didn’t write anything. Try again.');
       toast(s.targets.length ? `Your story practises ${plural(s.targets.length, 'LingQ')}` : 'Your story is ready', 4000);
-      location.hash = `#/lesson/${made.lesson.id}`;
+      // Left the Import screen meanwhile: the story waits in the Library instead of pulling you away.
+      if ($('#story-go')) location.hash = `#/lesson/${made.lesson.id}`;
     } catch (err) {
       if (!$('#story-go')) return;
       say(err.message === 'no-provider' ? 'No AI is set up yet.' : err.message);
@@ -352,7 +353,15 @@ export async function renderImport(view, arg) {
     }, 300);
   });
 
+  // One import at a time: a link that opens its lesson by itself and a tap on Import while the
+  // transcript loads would otherwise both create it.
+  let importing = false;
   $('#go').addEventListener('click', async () => {
+    if (importing) return;
+    importing = true;
+    try { await importNow(); } finally { importing = false; }
+  });
+  async function importNow() {
     const btn = $('#go');
     const ytUrl = $('#yt').value.trim();
     const ytId = youTubeId(ytUrl);
@@ -402,7 +411,7 @@ export async function renderImport(view, arg) {
     if (!made) return toast('No words found in that content.');
     toast(`Imported ${plural(made, 'lesson')} · ${plural(newWords, 'new word')} added to your pool`, 4000);
     location.hash = made === 1 ? `#/lesson/${lastId}` : '#/library';
-  });
+  }
 
   // Something shared into the app.
   const shared = takeShared();
