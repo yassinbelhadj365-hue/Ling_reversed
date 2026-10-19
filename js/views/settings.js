@@ -1,13 +1,14 @@
 import * as db from '../db.js';
 import { state, LANGS, lang, langName, saveSettings, loadSettings, loadVocab, toast, download, esc } from '../state.js';
-import { getKey, setKey, listModels, BACKUPS, getBackupKey, setBackupKey } from '../ai.js';
+import { getKey, listModels, PROVIDERS, getProviderKey, setProviderKey, keyKind, testProvider, sharedStatus, dashboardUrl } from '../ai.js';
+import { hash32 } from '../text.js';
 import { explain } from '../explain.js';
 import { MODELS as ASR_MODELS } from '../asr.js';
 
 const langOptions = (selected) =>
   LANGS.map(([code, name]) => `<option value="${code}" ${code === selected ? 'selected' : ''}>${name}</option>`).join('');
 
-export async function renderSettings(view) {
+export async function renderSettings(view, arg) {
   const s = state.settings;
   view.innerHTML = `
     <h1>Settings</h1>
@@ -66,34 +67,7 @@ export async function renderSettings(view) {
           Fastest in Chrome or Edge on a computer.</span></div>
     </div>
 
-    <div class="card">
-      <h2 style="margin-top:0">Translation &amp; explanations (AI)</h2>
-      <p class="small muted">Tapping a word asks one AI, Google Gemini (free tier), for the translation of the sentence, what the
-        word means <i>here</i>, and a short explanation in ${esc(langName(s.lang))} with examples. It reads the transcript around
-        the sentence for context.</p>
-      <ul class="small">
-        <li><b>Logged in to your account:</b> it works with no setup, using the sync server’s shared key.
-          Everyone on that server shares one free daily limit.</li>
-        <li><b>Your own key (optional):</b> gives you your own daily limit. Get one free at
-          <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a> (no card needed).</li>
-      </ul>
-      <div class="field"><label for="gm-key">Your Gemini key (optional)</label>
-        <input id="gm-key" type="password" autocomplete="off" placeholder="AIza…">
-        <span class="small muted">Stored only on this device, never synced or included in backups, and sent only to Google.</span></div>
-      <div class="field"><label for="gm-model">Model</label>
-        <select id="gm-model"><option value="">Automatic (newest free Flash model)</option></select>
-        <span class="small muted">The list needs your own key. “Lite” models are faster and have a higher free limit. Each model has its own free limit: when this one’s is used up or Google is busy, the other free Flash models answer by themselves, and Gemma (weaker, but rarely busy) last.</span></div>
-      <p class="small muted"><b>Backups (optional):</b> when Gemini is busy or used up, another free AI answers with your own key.
-        Both are free without a card; keys stay on this device. They can’t watch videos.</p>
-      ${BACKUPS.map((p) => `<div class="field"><label for="bk-${p.id}">${esc(p.name)} key (optional)</label>
-        <input id="bk-${p.id}" data-backup="${p.id}" type="password" autocomplete="off">
-        <span class="small muted">Free at <a href="${p.keyUrl}" target="_blank" rel="noopener">${esc(p.keyUrl.replace(/^https:\/\//, ''))}</a>.</span></div>`).join('')}
-      <label class="row"><input type="checkbox" data-bool="aiAuto" ${s.aiAuto ? 'checked' : ''}>
-        Ask automatically when I tap (otherwise there’s an Explain button, which saves the daily limit)</label>
-      <div class="row"><button class="btn small" id="gm-test">Test</button><span id="gm-status" class="small muted"></span></div>
-      <p class="small muted">“Still unclear?” in the word panel asks the same AI for a longer answer. It can also open DeepSeek or ChatGPT
-        (your own subscription) with the question ready.</p>
-    </div>
+    ${aiCardHtml(s)}
 
     <div class="card">
       <h2 style="margin-top:0">Text to speech</h2>
@@ -145,33 +119,7 @@ export async function renderSettings(view) {
     el.addEventListener('change', () => saveSettings({ [el.dataset.bool]: el.checked })));
   $('#asrModel').addEventListener('change', (e) => saveSettings({ asrModel: e.target.value }).then(() => toast('Saved')));
 
-  // ---- Gemini (free tier) ----
-  async function fillModels() {
-    const key = await getKey();
-    const chosen = state.settings.geminiModel;
-    let models = [];
-    if (key) try { models = await listModels(key); } catch { /* offline or bad key: Test says which */ }
-    if (chosen && !models.some((m) => m.id === chosen)) models.unshift({ id: chosen, name: chosen });
-    $('#gm-model').innerHTML = '<option value="">Automatic (newest free Flash model)</option>' +
-      models.map((m) => `<option value="${esc(m.id)}" ${m.id === chosen ? 'selected' : ''}>${esc(m.name)}</option>`).join('');
-  }
-  getKey().then((k) => { $('#gm-key').value = k; });
-  fillModels();
-  $('#gm-key').addEventListener('change', (e) => setKey(e.target.value).then(() => { toast('Key saved'); fillModels(); }));
-  $('#gm-model').addEventListener('change', (e) => saveSettings({ geminiModel: e.target.value }).then(() => toast('Saved')));
-  view.querySelectorAll('[data-backup]').forEach((el) => {
-    getBackupKey(el.dataset.backup).then((k) => { el.value = k; });
-    el.addEventListener('change', () => setBackupKey(el.dataset.backup, el.value).then(() => toast('Key saved')));
-  });
-  $('#gm-test').addEventListener('click', async () => {
-    $('#gm-status').textContent = 'Asking…';
-    try {
-      const { result, source } = await explain({ kind: 'word', term: 'casa', sentence: 'Mi casa es tu casa.', transcript: '' }, { fresh: true });
-      $('#gm-status').textContent = `✓ Works (${source}): “${result.meaning_native || result.translation || ''}”`;
-    } catch (err) {
-      $('#gm-status').textContent = err.message === 'no-provider' ? 'No AI yet: add your key, or log in to your account.' : err.message;
-    }
-  });
+  const stopAi = initAiCard(view, arg);
   $('#mergeCues').addEventListener('change', (e) => saveSettings({ mergeCues: e.target.checked }));
   $('#ttsRate').addEventListener('input', (e) => { $('#rateVal').textContent = e.target.value; });
   $('#ttsRate').addEventListener('change', (e) => saveSettings({ ttsRate: Number(e.target.value) }));
@@ -205,5 +153,187 @@ export async function renderSettings(view) {
     }
   });
 
-  return () => { if ('speechSynthesis' in window) speechSynthesis.removeEventListener('voiceschanged', fillVoices); };
+  return () => { stopAi(); if ('speechSynthesis' in window) speechSynthesis.removeEventListener('voiceschanged', fillVoices); };
+}
+
+// ---------- the AI card: Gemini, then the Mistral and Groq backups, then the shared server ----------
+// Getting a key is: tap "Get a free key", copy it on that site, come back, tap "Paste a key".
+// The app tells from the key's look which AI it belongs to, saves it and checks it at once.
+
+const STEPS = {
+  gemini: ['Sign in with your Google account.', 'Tap <b>Create API key</b> (any project is fine).', 'Copy the key (it starts with <b>AIza</b>).'],
+  mistral: ['Sign up or sign in (a Google account works).', 'Choose the free <b>Experiment</b> plan; it may ask to verify your phone number.',
+    'Tap <b>Create new key</b> and copy it.'],
+  groq: ['Sign in (a Google account works).', 'Tap <b>Create API Key</b> and give it any name.', 'Copy the key (it starts with <b>gsk_</b>).'],
+};
+const ROLE = { gemini: 'main AI', mistral: 'answers when Google is busy', groq: 'second backup' };
+const providerName = (id) => PROVIDERS.find((p) => p.id === id)?.name || id;
+
+function aiCardHtml(s) {
+  return `
+    <div class="card" id="ai-card">
+      <h2 style="margin-top:0">AI for translations</h2>
+      <p class="small muted">Each tap asks a free AI what the word means in its sentence. Gemini answers first; Mistral and Groq
+        answer when Google is busy. All three are free with no card and take about a minute each. Keys stay on this device.</p>
+      <div class="row"><button class="btn primary" id="key-paste">📋 Paste a key</button>
+        <span class="small muted" id="key-paste-st">Copied a key? Tap here: the app sees which AI it’s for and checks it.</span></div>
+      ${PROVIDERS.map((p, i) => `
+      <div class="ai-row" data-p="${p.id}">
+        <div class="row"><b>${i + 1}. ${esc(p.name)}</b><span class="small muted">${ROLE[p.id]}</span>
+          <span class="ai-st small" id="st-${p.id}"></span></div>
+        <details class="small"><summary>How to get the key</summary><ol>${STEPS[p.id].map((t) => `<li>${t}</li>`).join('')}</ol></details>
+        <div class="row">
+          <a class="btn small" href="${p.keyUrl}" target="_blank" rel="noopener" data-get="${p.id}">Get a free key ↗</a>
+          <input type="password" autocomplete="off" data-key="${p.id}" placeholder="…or paste it here" aria-label="${esc(p.name)} key">
+          <button class="btn small" data-test="${p.id}">Test</button>
+        </div>
+      </div>`).join('')}
+      <div class="ai-row" id="shared-row" hidden></div>
+      <div class="field" style="margin-top:12px"><label for="gm-model">Gemini model</label>
+        <select id="gm-model"><option value="">Automatic (newest free Flash model)</option></select>
+        <span class="small muted">The list needs your Gemini key. When this model’s free limit is used up or Google is busy, the other free Flash models answer by themselves, then Gemma (weaker, but rarely busy), then your backups.</span></div>
+      <label class="row"><input type="checkbox" data-bool="aiAuto" ${s.aiAuto ? 'checked' : ''}>
+        Ask automatically when I tap (otherwise there’s an Explain button, which saves the daily limit)</label>
+      <div class="row"><button class="btn small" id="gm-test">Test a lookup</button><span id="gm-status" class="small muted"></span></div>
+      <p class="small muted">“More” in the word panel asks the same AI for a longer answer. It can also open DeepSeek or ChatGPT
+        (your own subscription) with the question ready.</p>
+    </div>`;
+}
+
+function initAiCard(view, arg) {
+  const $ = (sel) => view.querySelector(sel);
+  if (arg === 'ai') $('#ai-card').scrollIntoView();
+  let waiting = null; // the provider whose key page was just opened
+
+  const show = (id, st) => {
+    const el = $(`#st-${id}`);
+    el.className = `ai-st small ${st.ok ? 'good' : st.ok === false ? 'bad' : 'muted'}`;
+    el.textContent = `${st.ok ? '✓ ' : st.ok === false ? '✗ ' : ''}${st.msg}`;
+  };
+  async function refresh(id) {
+    const key = await getProviderKey(id);
+    view.querySelector(`[data-key="${id}"]`).value = key;
+    view.querySelector(`[data-p="${id}"] details`).open = !key && id === 'gemini';
+    const last = await db.getSetting(`local:aitest:${id}`, null);
+    show(id, !key ? { msg: 'Not set up' } : last?.key === hash32(key) ? last : { msg: 'Saved, not checked yet' });
+  }
+  async function check(id) {
+    const key = await getProviderKey(id);
+    if (!key) return refresh(id);
+    show(id, { msg: 'Checking…' });
+    const r = await testProvider(id, key);
+    await db.setSetting(`local:aitest:${id}`, { ...r, key: hash32(key) });
+    show(id, r);
+    if (id === 'gemini') { fillModels(); showShared(); }
+  }
+  // Saves a key with the provider it belongs to (a Groq key pasted in the Gemini box goes to Groq).
+  async function save(text, into) {
+    const kind = keyKind(text) || into;
+    await setProviderKey(kind, text);
+    await refresh(kind);
+    if (text.trim()) await check(kind);
+    return kind;
+  }
+
+  PROVIDERS.forEach((p) => refresh(p.id));
+  view.querySelectorAll('[data-key]').forEach((el) => el.addEventListener('change', async () => {
+    const into = el.dataset.key;
+    const kind = await save(el.value, into);
+    if (kind !== into) {
+      el.value = await getProviderKey(into);
+      toast(`That’s a ${providerName(kind)} key: saved there.`);
+    }
+  }));
+  view.querySelectorAll('[data-test]').forEach((b) => b.addEventListener('click', () => check(b.dataset.test)));
+  view.querySelectorAll('[data-get]').forEach((a) => a.addEventListener('click', () => {
+    waiting = a.dataset.get;
+    $('#key-paste-st').textContent = `When you’ve copied the ${providerName(waiting)} key, come back here and tap Paste a key.`;
+    $('#key-paste').classList.add('pulse');
+  }));
+  // Coming back from the key page: put the Paste button in view.
+  const onVisible = () => { if (document.visibilityState === 'visible' && waiting) $('#key-paste').scrollIntoView({ block: 'center' }); };
+  document.addEventListener('visibilitychange', onVisible);
+
+  $('#key-paste').addEventListener('click', async () => {
+    const st = $('#key-paste-st');
+    let clip = '';
+    try { clip = (await navigator.clipboard.readText()).trim(); } catch { /* refused or unsupported */ }
+    if (!clip) { st.textContent = 'Couldn’t read the clipboard: long-press a key box below and choose Paste.'; return; }
+    // A key of an unknown shape is accepted for the provider whose page was just opened.
+    const kind = keyKind(clip) || (waiting && clip.length >= 20 && !/\s/.test(clip) ? waiting : null);
+    if (!kind) { st.textContent = 'The copied text doesn’t look like a Gemini, Mistral or Groq key. Copy the key itself and try again.'; return; }
+    $('#key-paste').classList.remove('pulse');
+    st.textContent = `${providerName(kind)} key found. Checking it…`;
+    await save(clip, kind);
+    st.textContent = `${providerName(kind)} key saved.${kind === 'gemini' ? ' Want a backup for busy times? Get a Mistral key next.' : ''}`;
+    waiting = null;
+  });
+
+  // The shared AI on the sync server: its state and, if needed, the steps to deploy or update it.
+  const code = fetch('./supabase/functions/ai/index.ts', { cache: 'no-store' }).then((r) => (r.ok ? r.text() : '')).catch(() => '');
+  async function copy(text, what) {
+    try { await navigator.clipboard.writeText(text); toast(`${what} copied`); } catch { toast(`Couldn’t copy the ${what.toLowerCase()}.`); }
+  }
+  async function showShared() {
+    const row = $('#shared-row');
+    const st = await sharedStatus();
+    if (!row.isConnected) return;
+    row.hidden = st === 'none';
+    if (st === 'none') return;
+    const fn = dashboardUrl('/functions') || 'https://supabase.com/dashboard';
+    const secrets = dashboardUrl('/functions/secrets') || 'https://supabase.com/dashboard';
+    const label = { ok: '✓ Up to date', old: '⚠ Needs updating', nokey: '⚠ Its Gemini key is missing', missing: 'Not set up' }[st];
+    const steps = [];
+    if (st === 'missing' || st === 'old') {
+      steps.push('<button class="btn small" data-copy="code">Copy the code</button>');
+      steps.push(`<a class="btn small" href="${fn}" target="_blank" rel="noopener">Open Supabase ↗</a> ${st === 'old'
+        ? 'open the function <b>ai</b> → <b>Code</b>, select everything, paste, then <b>Deploy</b>.'
+        : '<b>Deploy a new function</b> → <b>Via Editor</b>, name it <b>ai</b>, replace the example with what you copied, then <b>Deploy</b>.'}`);
+    }
+    if (st === 'missing' || st === 'nokey') {
+      steps.push(`<button class="btn small" data-copy="key">Copy your Gemini key</button> <a class="btn small" href="${secrets}" target="_blank" rel="noopener">Open Secrets ↗</a>
+        add a secret named <b>GEMINI_API_KEY</b> and paste the key.`);
+    }
+    if (steps.length) steps.push('<button class="btn small" data-recheck>Check again</button>');
+    row.innerHTML = `
+      <div class="row"><b>Shared AI on your sync server</b><span class="small muted">works on any device you log in to, no key needed</span>
+        <span class="ai-st small ${st === 'ok' ? 'good' : 'bad'}">${label}</span></div>
+      ${steps.length ? `<ol class="small">${steps.map((t) => `<li>${t}</li>`).join('')}</ol>` : ''}`;
+    row.querySelector('[data-copy="code"]')?.addEventListener('click', async () => {
+      const text = await code;
+      if (!text) return toast('Couldn’t load the code: open supabase/functions/ai/index.ts in the project.', 6000);
+      copy(text, 'Code');
+    });
+    row.querySelector('[data-copy="key"]')?.addEventListener('click', async () => {
+      const key = await getKey();
+      if (!key) return toast('Add your Gemini key above first.');
+      copy(key, 'Key');
+    });
+    row.querySelector('[data-recheck]')?.addEventListener('click', showShared);
+  }
+  showShared();
+
+  async function fillModels() {
+    const key = await getKey();
+    const chosen = state.settings.geminiModel;
+    let models = [];
+    if (key) try { models = await listModels(key); } catch { /* offline or bad key: its status says which */ }
+    if (chosen && !models.some((m) => m.id === chosen)) models.unshift({ id: chosen, name: chosen });
+    if (!$('#gm-model')) return;
+    $('#gm-model').innerHTML = '<option value="">Automatic (newest free Flash model)</option>' +
+      models.map((m) => `<option value="${esc(m.id)}" ${m.id === chosen ? 'selected' : ''}>${esc(m.name)}</option>`).join('');
+  }
+  fillModels();
+  $('#gm-model').addEventListener('change', (e) => saveSettings({ geminiModel: e.target.value }).then(() => toast('Saved')));
+  $('#gm-test').addEventListener('click', async () => {
+    $('#gm-status').textContent = 'Asking…';
+    try {
+      const { result, source } = await explain({ kind: 'word', term: 'casa', sentence: 'Mi casa es tu casa.', transcript: '' }, { fresh: true });
+      $('#gm-status').textContent = `✓ Works (${source}): “${result.meaning_native || result.translation || ''}”`;
+    } catch (err) {
+      $('#gm-status').textContent = err.message === 'no-provider' ? 'No AI yet: paste a key above, or log in to your account.' : err.message;
+    }
+  });
+
+  return () => document.removeEventListener('visibilitychange', onVisible);
 }

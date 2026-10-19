@@ -7,6 +7,7 @@
 //   POST /functions/v1/ai  {system, user, schema?, model?, fast?, temperature?, video?: {url, start?, end?}}
 //   -> {ok: true, text, model, video?: true} | {ok: false, status?, error}
 
+const VERSION = '2026-10-19'; // js/ai.js AI_FUNCTION_VERSION: Settings asks to redeploy an older one
 const DEFAULT_MODEL = Deno.env.get('GEMINI_MODEL') || 'gemini-3.6-flash';
 // Gemma has its own free limit and answers last when every Flash model is busy (not for videos).
 const GEMMA_MODELS = ['gemma-4-26b-a4b-it', 'gemma-4-31b-it', 'gemma-3-27b-it'];
@@ -86,7 +87,8 @@ function loggedIn(req: Request) {
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS });
-  if (new URL(req.url).searchParams.get('ping')) return reply({ ok: true, ping: true });
+  // The app's Settings checks this to say whether the function needs redeploying.
+  if (new URL(req.url).searchParams.get('ping')) return reply({ ok: true, ping: true, version: VERSION, key: !!Deno.env.get('GEMINI_API_KEY') });
   if (req.method !== 'POST') return reply({ ok: false, error: 'POST only' });
   if (!loggedIn(req)) return reply({ ok: false, error: 'Log in to your account to use the shared AI, or add your own free key in Settings.' });
   const key = Deno.env.get('GEMINI_API_KEY');

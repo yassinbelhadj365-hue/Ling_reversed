@@ -247,11 +247,13 @@ function answerAreaHtml() {
   }
   if (x.state === 'idle') return `<button class="btn primary" data-act="explain">Translate</button>${sentenceHtml('')}`;
   if (x.state === 'none') {
-    return `<p class="small muted">No AI is set up yet. Log in to your account (top right), or add a free Gemini key in
-      Settings. Meanwhile: ${linksHtml()}</p>${sentenceHtml('')}`;
+    return `<p class="small muted">No AI is set up yet: <a href="#/settings/ai">set it up (about a minute, free)</a>, or log in
+      to your account (top right). Meanwhile: ${linksHtml()}</p>${sentenceHtml('')}`;
   }
   if (x.state === 'error') {
-    return `<p class="small">${esc(x.msg)}</p><div class="row"><button class="btn small" data-act="explain">Try again</button>
+    // Busy or used up: a backup AI would have answered.
+    const fix = /busy|limit/i.test(x.msg) ? ` <a href="#/settings/ai">Add a free backup AI</a>` : '';
+    return `<p class="small">${esc(x.msg)}${fix}</p><div class="row"><button class="btn small" data-act="explain">Try again</button>
       <span class="small">${linksHtml()}</span></div>${sentenceHtml('')}`;
   }
   const r = x.result || {};

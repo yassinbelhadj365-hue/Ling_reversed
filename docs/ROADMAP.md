@@ -57,6 +57,12 @@ this file records where things stand, what the owner decided, and what's next.
   Research rejected: GitHub Models (retired), Cerebras and Hugging Face (no free tier any more),
   a cross-user lookup cache. Still open from the research: pre-translating a page's words in
   one request when it opens (Read Frog-style), offered to the owner and not chosen yet.
+- **AI setup in one place** (Settings → AI, 2026-10-19): "Get a free key ↗" per AI, one
+  📋 Paste a key button that recognizes Gemini/Mistral/Groq keys and checks them at once, a ✓/✗
+  status per AI, and the shared server's state with copy-the-code / open-Supabase steps when it
+  needs (re)deploying. Every "no AI" or "busy" message links there. Keys still have to be
+  entered on each device: copying them through the sync server was blocked as a security
+  risk and is waiting for the owner's decision.
 - **Phone**: Capacitor app in `mobile/`, built by GitHub Actions (APK + unsigned IPA,
   docs/MOBILE.md); YouTube captions fetched by the native app (js/youtube.js); file picker
   that iPhones don't grey out; iPhone Shortcut route (docs/IPHONE_SHORTCUT.md). The owner

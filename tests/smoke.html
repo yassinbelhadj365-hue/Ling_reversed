@@ -19,7 +19,7 @@ import { lessonLevel, lessonProgress, continueCard } from '../js/views/library.j
 import { milestoneFor, weekStart, recapOf, checkMilestone, milestoneProgress, milestoneBarHtml } from '../js/progress.js';
 import { parseStamp } from '../js/video-ai.js';
 import { levelOf, pickTargets } from '../js/story.js';
-import { requestBody, direct, _resetModels, geminiJson, hasProvider } from '../js/ai.js';
+import { requestBody, direct, _resetModels, geminiJson, hasProvider, keyKind } from '../js/ai.js';
 
 // A scriptable stand-in for the YouTube/media player (js/player.js test hook).
 function makeFakePlayer() {
@@ -203,6 +203,8 @@ try {
     && /busy/i.test(videoErr), 'when every Google model is busy, the Mistral backup answers; a video gets Google’s busy error: ' + videoErr);
   await db.setSetting('secret:gemini', '');
   ok((await hasProvider()) && !(await hasProvider({ video: true })), 'a backup key alone is enough for lookups, not for videos');
+  ok(keyKind(' AIzaSyD-abcdefghijklmnopqrstuvwxyz0123 ') === 'gemini' && keyKind('gsk_' + 'x'.repeat(40)) === 'groq'
+    && keyKind('aB3'.repeat(10) + 'zz') === 'mistral' && keyKind('hello there') === null, 'a pasted key is recognized by its look');
   await Promise.all(['secret:gemini', 'secret:mistral', 'secret:groq'].map((k, i) => db.setSetting(k, savedKeys[i])));
   window.fetch = realFetchU;
   delete window.__lingoBusyWait;
@@ -1137,6 +1139,36 @@ try {
   window.fetch = pageFetch;
   for (const [k, v] of Object.entries(savedLs)) v === null ? localStorage.removeItem(k) : localStorage.setItem(k, v);
   for (const n of [`${acc.id}-A`, `${acc.id}-B`, `${acc2.id}-A`]) indexedDB.deleteDatabase(`lingo-reader-${n}`);
+
+  // AI setup: one row per AI; a key pasted in the wrong box is saved where it belongs and checked.
+  W().location.hash = '#/settings/ai';
+  await until(() => D().querySelector('#ai-card [data-key="groq"]'));
+  const rows = [...D().querySelectorAll('#ai-card .ai-row[data-p]')].map((r) => r.dataset.p);
+  ok(rows.join() === 'gemini,mistral,groq' && D().querySelector('#key-paste')
+    && D().querySelector('[data-get="mistral"]').href.startsWith('https://console.mistral.ai/'),
+    'Settings → AI: Gemini, Mistral and Groq, each with a key link, plus one Paste button: ' + rows);
+  const frameFetch = W().fetch;
+  let groqAuth = '';
+  W().fetch = async (url, opts) => {
+    if (/api\.groq\.com/.test(String(url))) {
+      groqAuth = opts.headers.Authorization;
+      return new Response(JSON.stringify({ choices: [{ message: { content: '{"translation":"Hello everyone."}' } }] }));
+    }
+    return frameFetch(url, opts);
+  };
+  const groqKey = 'gsk_' + 'a1'.repeat(15);
+  const gmBox = D().querySelector('[data-key="gemini"]');
+  gmBox.value = groqKey;
+  gmBox.dispatchEvent(new Event('change'));
+  await until(() => /✓/.test(D().querySelector('#st-groq').textContent));
+  ok(D().querySelector('[data-key="groq"]').value === groqKey && !gmBox.value && groqAuth === `Bearer ${groqKey}`
+    && /Hello everyone/.test(D().querySelector('#st-groq').textContent),
+    'a Groq key pasted in the Gemini box is saved for Groq and checked: ' + D().querySelector('#st-groq').textContent);
+  const groqBox = D().querySelector('[data-key="groq"]');
+  groqBox.value = '';
+  groqBox.dispatchEvent(new Event('change'));
+  await until(() => /Not set up/.test(D().querySelector('#st-groq').textContent));
+  W().fetch = frameFetch;
 
   // setting: don't ask the AI automatically (saves the daily limit)
   const appState = await W().eval("import('/js/state.js')");

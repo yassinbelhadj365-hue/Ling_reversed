@@ -119,7 +119,7 @@ export async function renderLibrary(view) {
           <a class="btn ${sample ? '' : 'primary'}" href="#/import">Import a YouTube video or text</a>
         </div>
         ${ai ? '' : `<p class="small muted">Tapping a word asks a free AI. To turn it on, <a href="#/account">log in to your account</a>
-          or add a free key in <a href="#/settings">Settings</a>.</p>`}
+          or <a href="#/settings/ai">set up a free AI</a>.</p>`}
       </div>`;
     wireJobs(view, rerender);
     view.querySelector('#w-lang').addEventListener('change', (e) => {

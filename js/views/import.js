@@ -112,7 +112,7 @@ export async function renderImport(view, arg) {
   $('#story-go').addEventListener('click', async () => {
     const btn = $('#story-go'), say = (m, html = false) => { $('#story-status')[html ? 'innerHTML' : 'textContent'] = m; };
     if (!(await hasProvider())) {
-      return say('No AI is set up yet: add a free Gemini key in <a href="#/settings">Settings</a>, or <a href="#/account">log in</a> to your account.', true);
+      return say('No AI is set up yet: <a href="#/settings/ai">set one up</a> (about a minute, free), or <a href="#/account">log in</a> to your account.', true);
     }
     btn.disabled = true;
     say('Writing your story…');

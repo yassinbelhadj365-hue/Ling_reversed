@@ -12,7 +12,6 @@ import { hash32 } from './text.js';
 import { callFunction, cloudConfig, activeAccount, isSignedIn } from './cloud.js';
 
 const API = 'https://generativelanguage.googleapis.com/v1beta';
-const KEY_ROW = 'secret:gemini';
 export const FALLBACK_MODEL = 'gemini-3.6-flash';
 // Gemma runs on the same key with its own free limit, so it can still answer when every Flash
 // model is busy. It is weaker, so it comes last. Preferred first.
@@ -20,8 +19,11 @@ const GEMMA_MODELS = ['gemma-4-26b-a4b-it', 'gemma-4-31b-it', 'gemma-3-27b-it'];
 const isGemma = (id) => /^gemma-/.test(id);
 const CACHE_DAYS = 60;
 
-export const getKey = () => db.getSetting(KEY_ROW, '');
-export const setKey = (k) => db.setSetting(KEY_ROW, k.trim());
+// Each provider's key, on this device only (kv `secret:<provider>`).
+export const getProviderKey = (id) => db.getSetting(`secret:${id}`, '');
+export const setProviderKey = (id, k) => db.setSetting(`secret:${id}`, k.trim());
+export const getKey = () => getProviderKey('gemini');
+export const setKey = (k) => setProviderKey('gemini', k);
 
 // "gemini-2.5-flash" -> [2, 5]; anything that isn't a plain stable model -> null.
 const version = (id) => {
@@ -240,10 +242,8 @@ export const BACKUPS = [
   { id: 'groq', name: 'Groq', url: 'https://api.groq.com/openai/v1/chat/completions', model: 'openai/gpt-oss-120b',
     extra: { reasoning_effort: 'low' }, keyUrl: 'https://console.groq.com/keys' },
 ];
-export const getBackupKey = (id) => db.getSetting(`secret:${id}`, '');
-export const setBackupKey = (id, k) => db.setSetting(`secret:${id}`, k.trim());
 const backupsWithKeys = async () =>
-  (await Promise.all(BACKUPS.map(async (p) => ({ p, key: await getBackupKey(p.id) })))).filter((b) => b.key);
+  (await Promise.all(BACKUPS.map(async (p) => ({ p, key: await getProviderKey(p.id) })))).filter((b) => b.key);
 
 // One answer from a backup. -> {result, model}
 export async function backup(p, key, { system, user, schema, temperature = 0 }) {
@@ -270,6 +270,53 @@ export async function backup(p, key, { system, user, schema, temperature = 0 }) 
     throw new Error(msg);
   }
   return { result: parseJsonReply(data.choices?.[0]?.message?.content), model: p.model.replace(/^.*\//, '') };
+}
+
+// ---------- setup helpers (the Settings AI card) ----------
+
+export const PROVIDERS = [
+  { id: 'gemini', name: 'Google Gemini', keyUrl: 'https://aistudio.google.com/apikey' },
+  ...BACKUPS,
+];
+// Which provider a pasted key belongs to, from its look; null when it isn't recognizable.
+export function keyKind(text) {
+  const k = String(text || '').trim();
+  if (/^AIza[\w-]{30,}$/.test(k)) return 'gemini';
+  if (/^gsk_\w{20,}$/.test(k)) return 'groq';
+  if (/^[A-Za-z0-9]{32}$/.test(k)) return 'mistral';
+  return null;
+}
+
+// One tiny request to one provider with this key. -> {ok, msg}
+export async function testProvider(id, key) {
+  const ping = {
+    system: 'Translate the user\'s French text into natural English. Reply with JSON: {"translation": ""}',
+    user: 'Bonjour à tous.',
+    schema: LINE_SCHEMA,
+  };
+  try {
+    const { result, model } = id === 'gemini' ? await direct(key, ping) : await backup(BACKUPS.find((p) => p.id === id), key, ping);
+    return { ok: true, msg: `Works (${model}): “${result.translation || ''}”` };
+  } catch (err) {
+    return { ok: false, msg: err.message };
+  }
+}
+
+// The shared `ai` function on the sync server: what state is it in?
+// -> 'none' (no sync server) | 'missing' (not deployed) | 'old' (needs redeploying) | 'nokey' | 'ok'
+export const AI_FUNCTION_VERSION = '2026-10-19'; // bump with supabase/functions/ai/index.ts `VERSION`
+export async function sharedStatus() {
+  if (!cloudConfig()) return 'none';
+  const r = await callFunction('ai', { ping: '1' });
+  if (!r?.ping) return 'missing';
+  if (!(r.version >= AI_FUNCTION_VERSION)) return 'old';
+  return r.key === false ? 'nokey' : 'ok';
+}
+// The Supabase dashboard of the configured sync server, or null.
+export function dashboardUrl(page = '') {
+  const host = cloudConfig() && new URL(cloudConfig().url).hostname;
+  const ref = host && /^([a-z0-9]+)\.supabase\.co$/.exec(host)?.[1];
+  return ref ? `https://supabase.com/dashboard/project/${ref}${page}` : null;
 }
 
 // Is any AI reachable without asking the user for anything? (Videos need Gemini.)
