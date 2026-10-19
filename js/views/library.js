@@ -36,6 +36,19 @@ export function lessonProgress(l, pageSize = state.settings.pageSize) {
   return Math.min(99, Math.round(((l.page || 0) / pages) * 100));
 }
 
+// How long a lesson takes: "12 min" for a video or audio (its last line's start), else the
+// reading time at about 150 words a minute.
+export function lessonLength(l) {
+  const last = l.segments?.at(-1)?.start;
+  if (Number.isFinite(last)) return `${Math.max(1, Math.round((last + 5) / 60))} min`;
+  return `~${Math.max(1, Math.round((l.wordCount || 0) / 150))} min read`;
+}
+
+// A YouTube lesson's thumbnail (YouTube's public image link, no key); removed if it can't load.
+const thumbHtml = (l) => (l.youtubeId
+  ? `<img class="thumb" loading="lazy" alt="" src="https://i.ytimg.com/vi/${encodeURIComponent(l.youtubeId)}/mqdefault.jpg" onerror="this.remove()">`
+  : '');
+
 // The top of the Library: one obvious next step. "Continue" is the lesson you opened last
 // and haven't finished; "Up next" is an unfinished lesson at a good level for you (the
 // one you know most of among 85–95%, else the easiest). '' when there's nothing to suggest.
@@ -48,12 +61,12 @@ export function continueCard(lessons) {
   if (!last && !next) return '';
   const pct = last ? lessonProgress(last) : 0;
   return `<div class="card continue">
-    ${last ? `<a class="continue-main" href="#/lesson/${last.id}">
+    ${last ? `<a class="continue-main with-thumb" href="#/lesson/${last.id}">${thumbHtml(last)}<span class="lc-body">
         <span class="small muted">Continue</span>
         <b dir="auto">${esc(last.title)}</b>
         <div class="meter" role="img" aria-label="${pct}% through"><div style="width:${pct}%"></div></div>
-        <span class="small muted">${pct ? `${pct}% through` : 'Just started'}</span>
-      </a>` : ''}
+        <span class="small muted">${pct ? `${pct}% through` : 'Just started'} · ${lessonLength(last)}</span>
+      </span></a>` : ''}
     ${next ? `<div class="small up-next">${last ? 'Up next' : 'Start with'}: <a href="#/lesson/${next.l.id}" dir="auto">${esc(next.l.title)}</a>
         <span class="level ${next.lvl.cls}">${next.lvl.label} · you know ${next.lvl.pct}%</span></div>` : ''}
   </div>`;
@@ -148,19 +161,19 @@ export async function renderLibrary(view) {
     const pct = (n) => Math.round((n / total) * 100);
     const lvl = lessonLevel(l.words);
     return `
-      <a class="card lesson-card" href="#/lesson/${l.id}">
+      <a class="card lesson-card with-thumb" href="#/lesson/${l.id}">${thumbHtml(l)}<div class="lc-body">
         <h3 dir="auto">${esc(l.title)}</h3>
         <div class="row small muted">
           <span class="badge">${l.youtubeId ? 'YouTube' : l.story ? '✨ Story' : KIND[l.kind] || 'Text'}</span>
           <span class="level ${lvl.cls}" title="Share of this lesson’s words you already know">${lvl.label} · you know ${lvl.pct}%</span>
-          <span>${l.wordCount.toLocaleString()} words</span>
+          <span>${lessonLength(l)}</span>
           ${l.completed ? '<span class="badge">✓ Completed</span>' : l.page ? `<span class="badge">In progress</span>` : ''}
         </div>
         <div class="meter" role="img" aria-label="${pct(known)}% known, ${pct(learning)}% LingQs, ${pct(fresh)}% new">
           <div style="width:${pct(known)}%"></div><div class="l" style="width:${pct(learning)}%"></div>
         </div>
         <div class="small muted">${fresh.toLocaleString()} new words · ${learning} LingQs · ${terms.length.toLocaleString()} different words</div>
-      </a>`;
+      </div></a>`;
   }).join('');
 
   const recap = await lastWeekCard();

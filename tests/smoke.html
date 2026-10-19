@@ -575,9 +575,13 @@ try {
   W().location.hash = '#/review';
   await until(() => D().getElementById('show'));
   ok(!!D().getElementById('show'), 'review card shown');
-  D().getElementById('show').click();
+  D().querySelector('.flash .term').click(); // anywhere on the card
   await until(() => D().querySelector('[data-g="good"]'));
   ok(/food|muy rica|comida/.test(D().getElementById('view').textContent), 'card shows the term');
+  ok(D().querySelectorAll('.grade-dock [data-g]').length === 4 && D().getElementById('view').classList.contains('grading'),
+    'tapping anywhere on the card reveals it; the four grades sit together in one bar');
+  const icon = D().querySelector('link[rel="apple-touch-icon"]')?.getAttribute('href');
+  ok(icon === 'icon-180.png' && (await fetch('../icon-180.png')).headers.get('content-type') === 'image/png', 'the iPhone home-screen icon is a PNG');
   D().querySelector('[data-g="good"]').click();
   await sleep(300);
 
@@ -734,6 +738,9 @@ try {
   ok((await db.get('words', 'es|perro'))?.ev?.since === 0, 'the word tapped in that line did not get a clean pass there');
   W().location.hash = '#/library';                 // a second visit counts again
   await until(() => D().querySelector('.lesson-card'));
+  const ytCard = [...D().querySelectorAll('.lesson-card')].find((c) => /ytimg/.test(c.innerHTML));
+  ok(ytCard && /i\.ytimg\.com\/vi\/[\w-]+\/mqdefault\.jpg/.test(ytCard.innerHTML) && /\b\d+ min\b/.test(ytCard.textContent),
+    'a YouTube lesson card shows the video’s thumbnail and its length: ' + (ytCard?.textContent.match(/\d+ min/) || ''));
   W().history.back();
   await until(() => V().classList.contains('listen') && D().querySelector('#reader .w'));
   await playThrough(0, 4.2);
@@ -925,6 +932,31 @@ try {
     'the page’s new words are looked up together in the background; a tap then answers from them with no AI call');
   W().__lingoNoPrefetch = true;
   lookState.settings.lookAhead = false;
+  D().querySelector('#word-panel [data-act="close"]')?.click();
+
+  // ---- with automatic levels off, "Next page" marks blue words known, and Undo puts them back ----
+  const keep = { autoStatus: lookState.settings.autoStatus, pagingKnown: lookState.settings.pagingKnown, pageSize: lookState.settings.pageSize };
+  Object.assign(lookState.settings, { autoStatus: false, pagingKnown: true, pageSize: 5 });
+  W().location.hash = '#/library';
+  await until(() => !D().getElementById('reader'));
+  W().location.hash = `#/lesson/${storyLesson.id}`;
+  await until(() => D().querySelector('#reader .w') && /Next page/.test(D().getElementById('next')?.textContent || ''));
+  const blueOnPage = [...new Set([...D().querySelectorAll('#reader .w')].map((s) => s.dataset.n))].filter((t) => lookState.vocab.get(t)?.status === 0 || !lookState.vocab.get(t));
+  D().getElementById('next').click();
+  await until(() => /moved to known/.test(D().getElementById('toast').textContent) && D().querySelector('#toast:not([hidden]) .toast-action'));
+  const knownAfterNext = blueOnPage.filter((t) => lookState.vocab.get(t)?.status === 5).length;
+  D().querySelector('#toast .toast-action').click();
+  await until(() => blueOnPage.every((t) => lookState.vocab.get(t)?.status === 0));
+  ok(blueOnPage.length && knownAfterNext === blueOnPage.length && blueOnPage.every((t) => lookState.vocab.get(t)?.status === 0),
+    `Undo after “Next page” puts the words it marked known back to new (${blueOnPage.length} words), also with automatic levels off`);
+  Object.assign(lookState.settings, keep);
+  const storyBack = await db.get('lessons', storyLesson.id); // back to the first page for the next tests
+  storyBack.page = 0;
+  await db.put('lessons', storyBack);
+  W().location.hash = '#/library';
+  await until(() => !D().getElementById('reader'));
+  W().location.hash = `#/lesson/${storyLesson.id}`;
+  await until(() => /El gato/.test(D().getElementById('reader')?.textContent || ''));
   D().querySelector('#word-panel .close, #word-panel [data-act="close"]')?.click();
 
   // ---- read aloud: sentence by sentence, the spoken word highlighted (fake speech engine) ----

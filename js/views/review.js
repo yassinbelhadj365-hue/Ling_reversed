@@ -46,7 +46,7 @@ export async function renderReview(view) {
     }
     view.innerHTML = `
       <div class="row spread"><h1>Review</h1><span class="muted small">${idx + 1} / ${queue.length}</span></div>
-      <div class="card flash">
+      <div class="card flash${shown ? '' : ' to-reveal'}">
         <div class="term" dir="auto">${esc(w.term)}</div>
         <div><button class="btn small" id="speak">🔊 Listen</button> <span class="badge">LingQ ${w.status}</span></div>
         ${w.context ? `<p class="ctx" dir="auto">${highlight(w.context, w.term)}</p>` : ''}
@@ -54,18 +54,20 @@ export async function renderReview(view) {
           ? `<div class="answer" dir="auto">${w.hint ? esc(w.hint) : '<span class="muted">No hint saved — tap the word in a lesson to add one.</span>'}</div>
              ${w.contextTr ? `<p class="ctx small" dir="auto">${esc(w.contextTr)}</p>` : ''}
              ${otherMeanings(w)}`
-          : '<button class="btn primary" id="show">Show meaning (space)</button>'}
+          : '<p class="muted small" id="show">Tap the card to show the meaning</p>'}
       </div>
       ${shown ? `
-        <div class="grade-row">
-          ${GRADES.map(([g, label], i) => `<button class="btn" data-g="${g}">${label}<small>${i + 1} · ${previewInterval(w, g)}</small></button>`).join('')}
+        <div class="grade-row grade-dock">
+          ${GRADES.map(([g, label], i) => `<button class="btn" data-g="${g}">${label}<small><span class="key">${i + 1} · </span>${previewInterval(w, g)}</small></button>`).join('')}
         </div>
         <div class="row" style="margin-top:8px;justify-content:center">
           <button class="btn small" data-s="${KNOWN}">✓ I know this (K)</button>
           <button class="btn small" data-s="${IGNORED}">Ignore (X)</button>
         </div>` : ''}`;
-    view.querySelector('#speak').addEventListener('click', () => speak(w.term));
-    view.querySelector('#show')?.addEventListener('click', reveal);
+    view.querySelector('#speak').addEventListener('click', (e) => { e.stopPropagation(); speak(w.term); });
+    // The whole card reveals the meaning: no small button to aim for.
+    if (!shown) view.querySelector('.flash').addEventListener('click', reveal);
+    view.classList.toggle('grading', shown);
     view.querySelectorAll('[data-g]').forEach((b) => b.addEventListener('click', () => answer(b.dataset.g)));
     view.querySelectorAll('[data-s]').forEach((b) => b.addEventListener('click', () => setTo(Number(b.dataset.s))));
   }
@@ -101,7 +103,7 @@ export async function renderReview(view) {
 
   start(dueNow());
   const stopTimer = startStudyTimer(); // review time counts toward the daily goal
-  return () => { document.removeEventListener('keydown', onKey); stopTimer(); };
+  return () => { document.removeEventListener('keydown', onKey); stopTimer(); view.classList.remove('grading'); };
 }
 
 // The card is about the meaning met most recently (its sentence and hint); the word's

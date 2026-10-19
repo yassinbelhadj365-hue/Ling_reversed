@@ -152,6 +152,12 @@ textarea { min-height: 160px; resize: vertical; }
 .lesson-card { display: flex; flex-direction: column; gap: 8px; text-decoration: none; color: var(--text); margin: 0; }
 .lesson-card:hover { border-color: var(--accent); }
 .lesson-card h3 { margin: 0; font-size: 1rem; overflow-wrap: anywhere; }
+/* Lesson cards and the Continue card: a YouTube thumbnail on the left when there is one. */
+.with-thumb:has(> .thumb) { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 12px; align-items: start; }
+.lc-body { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.continue-main .lc-body { gap: 4px; }
+.thumb { width: 100%; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 8px; background: var(--surface-2); }
+@media (max-width: 380px) { .with-thumb:has(> .thumb) { grid-template-columns: 96px minmax(0, 1fr); } }
 .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: .75rem; background: var(--surface-2); color: var(--text-2); }
 .level { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: .75rem; font-weight: 600; border: 1px solid currentColor; }
 .level.easy { color: var(--good); }
@@ -266,6 +272,8 @@ body.listen-mode main { max-width: 1400px; }
     box-shadow: 0 -8px 24px rgb(0 0 0 / .18);
   }
 }
+/* While the word sheet is open on a phone, the page can scroll its last line above it. */
+@media (max-width: 720px) { body.panel-room #view { padding-bottom: 70vh; } }
 .panel-word { font-size: 1.6rem; font-weight: 700; margin: 0; overflow-wrap: anywhere; }
 .status-row { display: grid; grid-template-columns: repeat(4, 1fr) 1.4fr; gap: 6px; margin: 12px 0; }
 .status-row button { min-height: 40px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface); cursor: pointer; font-weight: 600; }
@@ -330,6 +338,17 @@ details.more[open] > summary { margin-bottom: 6px; }
 .grade-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 8px; }
 .grade-row .btn { flex-direction: column; gap: 0; }
 .grade-row .btn small { color: var(--text-2); font-size: .72rem; }
+.flash.to-reveal { cursor: pointer; }
+@media (hover: none) { .grade-row .key { display: none; } } /* keyboard numbers, useless on a touch screen */
+/* Phones: the four grades sit in one row just above the tab bar, under the thumb. */
+@media (max-width: 720px) {
+  .grade-dock {
+    position: fixed; left: 0; right: 0; z-index: 15; bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom, 0px));
+    grid-template-columns: repeat(4, 1fr); gap: 6px; padding: 8px 12px; background: var(--bg); border-top: 1px solid var(--border);
+  }
+  .grade-dock .btn { min-height: 56px; padding: 4px; }
+  #view.grading { padding-bottom: 96px; }
+}
 
 /* ---------- vocab table ---------- */
 .table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }

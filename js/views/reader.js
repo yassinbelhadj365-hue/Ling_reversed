@@ -484,6 +484,7 @@ export async function renderReader(view, id) {
     }
   }
   function onPanelClose() {
+    document.body.classList.remove('panel-room');
     if (pausedForLookup && !dead && S.resumeAfterLookup) player.play();
     pausedForLookup = false;
     if (readPausedAt != null && !dead && S.resumeAfterLookup) readAloud(readPausedAt);
@@ -675,6 +676,17 @@ export async function renderReader(view, id) {
       onChange: refresh, onClose: onPanelClose,
     });
     if (listen) requestAnimationFrame(() => followTo(activeIdx, true));
+    else requestAnimationFrame(() => keepAbovePanel(spans[spans.length - 1]));
+  }
+
+  // On a phone the panel is a bottom sheet: a word low on the screen would end up behind its
+  // own panel, so scroll it into the space above.
+  function keepAbovePanel(span) {
+    const sheet = document.getElementById('word-panel');
+    if (!sheet || sheet.hidden || !matchMedia('(max-width: 720px)').matches) return;
+    document.body.classList.add('panel-room'); // room to scroll a word at the very end of the page
+    const top = sheet.getBoundingClientRect().top, bottom = span.getBoundingClientRect().bottom;
+    if (bottom > top - 12) window.scrollBy({ top: bottom - top + 72, behavior: 'smooth' });
   }
 
   // The context of an occurrence (its sentence, or a few caption lines around it), with the word's position in it.
@@ -1012,11 +1024,13 @@ export async function renderReader(view, id) {
     const changes = await finishPage();
     track(changes);
     const msg = summarize(changes);
-    const undoable = S.autoStatus && changes.length;
+    // Undo in both modes: automatic levels keep their own undo; "turning a page marks blue
+    // words known" puts those words back to new.
+    const undoable = changes.length > 0;
     const undoAction = { label: 'Undo', onClick: async () => {
-      const n = await undoAuto(changes.map((c) => c.term));
-      refresh();
-      track([]);
+      const terms = changes.map((c) => c.term);
+      const n = S.autoStatus ? await undoAuto(terms) : (await setStatusMany(terms, NEW), terms.length);
+      if (reader.isConnected) { refresh(); track([]); } // the toast can outlive this lesson's page
       toast(`${plural(n, 'change')} undone`);
     } };
     if (page < pages.length - 1) {
@@ -1025,7 +1039,7 @@ export async function renderReader(view, id) {
       await db.put('lessons', lesson);
       renderPage();
       window.scrollTo(0, 0);
-      if (msg) toast(msg, 3000, undoable ? undoAction : null);
+      if (msg) toast(msg, undoable ? 6000 : 3000, undoable ? undoAction : null);
     } else {
       lesson.completed = true;
       lesson.page = 0;
