@@ -100,7 +100,7 @@ export async function renderVocab(view, initialFilter) {
     view.querySelectorAll('[data-f]').forEach((b) => b.classList.toggle('on', b.dataset.f === filter));
     const rows = visible();
     $('#table').innerHTML = rows.length ? `
-      <div class="table-wrap"><table>
+      <div class="table-wrap"><table class="vocab-table${filter === 'auto' ? ' show-auto' : ''}">
         <thead><tr><th>Word</th><th>Status</th><th>Hint</th><th>Encounters to known</th><th>Seen in text</th><th>Lessons</th><th>Auto change</th></tr></thead>
         <tbody>${rows.slice(0, limit).map((w) => `
           <tr>

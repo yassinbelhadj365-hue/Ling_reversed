@@ -572,6 +572,8 @@ try {
   ok(D().querySelectorAll('.tile .v')[1].textContent === '12', 'revert moved "hola" back out of known');
 
   // review
+  const dueBadge = D().querySelector('.tabbar [data-tab="review"]').dataset.count;
+  ok(Number(dueBadge) >= 1, 'the Review tab shows how many cards are due without opening it: ' + dueBadge);
   W().location.hash = '#/review';
   await until(() => D().getElementById('show'));
   ok(!!D().getElementById('show'), 'review card shown');

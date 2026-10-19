@@ -1,4 +1,4 @@
-import { state, setStatus, applyReview, bumpActivity, speak, esc, plural, startStudyTimer } from '../state.js';
+import { state, setStatus, restoreWord, applyReview, bumpActivity, speak, esc, plural, startStudyTimer, toast } from '../state.js';
 import { previewInterval, isLearning, KNOWN, IGNORED } from '../srs.js';
 
 const GRADES = [['again', 'Again'], ['hard', 'Hard'], ['good', 'Good'], ['easy', 'Easy']];
@@ -15,6 +15,7 @@ export async function renderReview(view) {
   let idx = 0;
   let shown = false;
   let done = 0;
+  let alive = true; // this screen is still shown (an Undo can come later)
 
   const learning = () => [...state.vocab.values()].filter((w) => isLearning(w.status));
   const dueNow = () => learning().filter((w) => (w.srs?.due ?? 0) <= Date.now()).sort((a, b) => (a.srs?.due ?? 0) - (b.srs?.due ?? 0));
@@ -74,17 +75,28 @@ export async function renderReview(view) {
 
   function reveal() { shown = true; draw(); }
 
-  async function answer(g) {
+  // The next card shows at once; the grade is saved in the background.
+  function answer(g) {
     const w = queue[idx];
-    await applyReview(w, g);
+    applyReview(w, g).catch((err) => toast(`Couldn’t save that grade: ${err.message}`));
     if (g === 'again') queue.push(w); // see it again this session
     next();
   }
 
-  async function setTo(status) {
-    await setStatus(queue[idx].term, status, {}, { manual: true });
-    await bumpActivity({ reviews: 1 });
+  // Known or Ignore takes the word out of review; Undo brings it back as it was.
+  function setTo(status) {
+    const w = queue[idx];
+    const before = { status: w.status, srs: w.srs, ev: w.ev };
+    setStatus(w.term, status, {}, { manual: true }).then(() => bumpActivity({ reviews: 1 }));
     next();
+    toast(status === KNOWN ? `“${w.term}” is known now` : `“${w.term}” ignored`, 6000, { label: 'Undo', onClick: async () => {
+      await restoreWord(w.term, before);
+      if (!alive) return;
+      queue.splice(idx, 0, w);
+      done--;
+      shown = false;
+      draw();
+    } });
   }
 
   function next() { done++; idx++; shown = false; draw(); }
@@ -103,7 +115,7 @@ export async function renderReview(view) {
 
   start(dueNow());
   const stopTimer = startStudyTimer(); // review time counts toward the daily goal
-  return () => { document.removeEventListener('keydown', onKey); stopTimer(); view.classList.remove('grading'); };
+  return () => { alive = false; document.removeEventListener('keydown', onKey); stopTimer(); view.classList.remove('grading'); };
 }
 
 // The card is about the meaning met most recently (its sentence and hint); the word's

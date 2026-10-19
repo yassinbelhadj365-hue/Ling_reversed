@@ -106,6 +106,13 @@ mark { background: var(--w-1); color: inherit; border-radius: 3px; padding: 0 2p
   font-size: .72rem; text-decoration: none; color: var(--text-2);
 }
 .tabbar a span { font-size: 1.25rem; line-height: 1.2; }
+/* Cards due now, on the Review tab (app.js showDueCount). */
+.tabbar a { position: relative; }
+.tabbar a[data-count]:not([data-count=""])::after {
+  content: attr(data-count); position: absolute; top: 4px; left: calc(50% + 6px);
+  min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px;
+  background: var(--danger); color: #fff; font-size: .68rem; font-weight: 700; line-height: 18px; text-align: center;
+}
 .tabbar a.active { color: var(--accent); font-weight: 600; }
 
 main { max-width: 860px; margin: 0 auto; padding: 16px; outline: none; }
@@ -476,3 +483,15 @@ details.more-options #help { margin-top: 10px; }
   /* Toasts go above an open sheet instead of covering its buttons. */
   body:has(#word-panel:not([hidden])) #toast { bottom: auto; top: calc(env(safe-area-inset-top, 0px) + 64px); }
 }
+
+/* Vocab on a phone: word, status and hint fit the screen (no sideways scrolling); the other
+   columns show on wider screens, and "Auto change" in the automatic-changes view. */
+@media (max-width: 720px) {
+  .vocab-table th:nth-child(n+4), .vocab-table td:nth-child(n+4) { display: none; }
+  .vocab-table.show-auto th:nth-child(7), .vocab-table.show-auto td:nth-child(7) { display: table-cell; }
+  .vocab-table th, .vocab-table td { white-space: normal; }
+}
+
+/* Settings: rarely changed options wait under a closed "Advanced". */
+details.advanced { margin-top: 8px; }
+details.advanced > summary { cursor: pointer; color: var(--text-2); padding: 6px 0; }

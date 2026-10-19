@@ -12,18 +12,27 @@ const langOptions = (selected) =>
 
 export async function renderSettings(view, arg) {
   const s = state.settings;
+  // Only what applies here: no install instructions inside the installed app, no on-device
+  // transcription model on a phone (it runs on the computer), backup text that knows about sync.
+  const installed = matchMedia('(display-mode: standalone)').matches || navigator.standalone === true
+    || !!window.Capacitor?.isNativePlatform?.();
+  const touch = matchMedia('(pointer: coarse)').matches;
+  const acc = activeAccount();
+  const syncing = !!(acc && isSignedIn(acc));
   view.innerHTML = `
     <h1>Settings</h1>
     <div class="card">
       <div class="field"><label for="native">Your native language (for translations)</label>
         <select id="native">${langOptions(s.native)}</select></div>
-      <div class="field"><label for="pageSize">Words per reader page</label>
-        <input id="pageSize" type="number" min="50" max="2000" step="50" value="${s.pageSize}"></div>
       <div class="field"><label for="dailyMinutes">Daily goal: minutes of reading, listening or review</label>
         <select id="dailyMinutes" style="width:auto">${[5, 10, 15, 20, 30, 45, 60].map((m) => `<option value="${m}" ${s.dailyMinutes === m ? 'selected' : ''}>${m} minutes</option>`).join('')}</select>
         <span class="small muted">Small is fine: a short day every day beats a long one now and then. One missed day a week doesn’t break your streak.</span></div>
-      <label class="row"><input type="checkbox" id="mergeCues" ${s.mergeCues ? 'checked' : ''}>
-        Merge short caption lines into sentences when importing</label>
+      <details class="advanced"><summary class="small">Advanced</summary>
+        <div class="field"><label for="pageSize">Words per reader page</label>
+          <input id="pageSize" type="number" min="50" max="2000" step="50" value="${s.pageSize}"></div>
+        <label class="row"><input type="checkbox" id="mergeCues" ${s.mergeCues ? 'checked' : ''}>
+          Merge short caption lines into sentences when importing</label>
+      </details>
     </div>
 
     <div class="card">
@@ -62,11 +71,11 @@ export async function renderSettings(view, arg) {
         ['pauseOnLookup', 'Pause the video when I tap a word'],
         ['resumeAfterLookup', 'Resume when I close the word panel'],
       ].map(([k, label]) => `<label class="row"><input type="checkbox" data-bool="${k}" ${s[k] ? 'checked' : ''}> ${label}</label>`).join('')}
-      <div class="field" style="margin-top:12px"><label for="asrModel">AI transcription model (runs on this device, free)</label>
+      ${touch ? '' : `<div class="field" style="margin-top:12px"><label for="asrModel">AI transcription model (runs on this device, free)</label>
         <select id="asrModel">${Object.entries(ASR_MODELS).map(([k, m]) =>
           `<option value="${k}" ${s.asrModel === k ? 'selected' : ''}>${m.label}</option>`).join('')}</select>
         <span class="small muted">Used by “Transcribe with AI” and “Check transcript against audio”. Downloaded once, then cached.
-          Fastest in Chrome or Edge on a computer.</span></div>
+          Fastest in Chrome or Edge on a computer.</span></div>`}
     </div>
 
     ${aiCardHtml(s)}
@@ -80,7 +89,9 @@ export async function renderSettings(view, arg) {
 
     <div class="card">
       <h2 style="margin-top:0">Backup</h2>
-      <p class="small muted">All your data is stored only in this browser. Export a backup to move it to another device (e.g. from your computer to your phone).
+      <p class="small muted">${syncing
+        ? 'Your lessons and words sync with your account, so a backup file is only an extra copy.'
+        : 'All your data is stored only in this browser. Export a backup to move it to another device (e.g. from your computer to your phone).'}
         Audio/video files are not included.</p>
       <div class="row">
         <button class="btn" id="export">Export backup</button>
@@ -88,13 +99,13 @@ export async function renderSettings(view, arg) {
       </div>
     </div>
 
-    <div class="card">
+    ${installed ? '' : `<div class="card">
       <h2 style="margin-top:0">Install on your phone</h2>
       <p class="small"><b>The phone app</b> (Android and iPhone, free) can download YouTube transcripts by itself.
         See <i>docs/MOBILE.md</i> in the project for how to build and install it.</p>
       <p class="small">Or open this website in your phone’s browser and use <b>Share → Add to Home Screen</b> (iPhone, Safari) or
         <b>⋮ → Install app</b> (Android, Chrome). It then opens full-screen and works offline, except for AI lookups.</p>
-    </div>`;
+    </div>`}`;
 
   const $ = (sel) => view.querySelector(sel);
   const num = (el, min, max, fallback) => {
@@ -102,9 +113,9 @@ export async function renderSettings(view, arg) {
     return Number.isFinite(v) ? Math.min(max, Math.max(min, v)) : fallback;
   };
 
-  $('#native').addEventListener('change', (e) => saveSettings({ native: e.target.value }).then(() => toast('Saved')));
-  $('#pageSize').addEventListener('change', (e) => saveSettings({ pageSize: num(e.target, 50, 2000, 250) }).then(() => toast('Saved')));
-  $('#dailyMinutes').addEventListener('change', (e) => saveSettings({ dailyMinutes: Number(e.target.value) }).then(() => toast('Saved')));
+  $('#native').addEventListener('change', (e) => saveSettings({ native: e.target.value }));
+  $('#pageSize').addEventListener('change', (e) => saveSettings({ pageSize: num(e.target, 50, 2000, 250) }));
+  $('#dailyMinutes').addEventListener('change', (e) => saveSettings({ dailyMinutes: Number(e.target.value) }));
   $('#pagingKnown').addEventListener('change', (e) => saveSettings({ pagingKnown: e.target.checked }));
   $('#autoStatus').addEventListener('change', (e) => {
     saveSettings({ autoStatus: e.target.checked });
@@ -119,7 +130,7 @@ export async function renderSettings(view, arg) {
   $('#autoAdjustManual').addEventListener('change', (e) => saveSettings({ autoAdjustManual: e.target.checked }));
   view.querySelectorAll('[data-bool]').forEach((el) =>
     el.addEventListener('change', () => saveSettings({ [el.dataset.bool]: el.checked })));
-  $('#asrModel').addEventListener('change', (e) => saveSettings({ asrModel: e.target.value }).then(() => toast('Saved')));
+  $('#asrModel')?.addEventListener('change', (e) => saveSettings({ asrModel: e.target.value }));
 
   const stopAi = initAiCard(view, arg);
   $('#mergeCues').addEventListener('change', (e) => saveSettings({ mergeCues: e.target.checked }));
@@ -196,9 +207,11 @@ function aiCardHtml(s) {
       <label class="row ai-row" id="keysync-row" hidden><span><input type="checkbox" id="keysync">
         Use these keys on all my devices: paste them once, and your phone and computer get them when they sync</span></label>
       <div class="ai-row" id="shared-row" hidden></div>
-      <div class="field" style="margin-top:12px"><label for="gm-model">Gemini model</label>
+      <details class="advanced"><summary class="small">Advanced: Gemini model</summary>
+      <div class="field" style="margin-top:8px"><label for="gm-model">Gemini model</label>
         <select id="gm-model"><option value="">Automatic (newest free Flash model)</option></select>
         <span class="small muted">The list needs your Gemini key. When this model’s free limit is used up or Google is busy, the other free Flash models answer by themselves, then Gemma (weaker, but rarely busy), then your backups.</span></div>
+      </details>
       <label class="row"><input type="checkbox" data-bool="aiAuto" ${s.aiAuto ? 'checked' : ''}>
         Ask automatically when I tap (otherwise there’s an Explain button, which saves the daily limit)</label>
       <label class="row"><input type="checkbox" data-bool="lookAhead" ${s.lookAhead ? 'checked' : ''}>
@@ -353,7 +366,7 @@ function initAiCard(view, arg) {
       models.map((m) => `<option value="${esc(m.id)}" ${m.id === chosen ? 'selected' : ''}>${esc(m.name)}</option>`).join('');
   }
   fillModels();
-  $('#gm-model').addEventListener('change', (e) => saveSettings({ geminiModel: e.target.value }).then(() => toast('Saved')));
+  $('#gm-model').addEventListener('change', (e) => saveSettings({ geminiModel: e.target.value }));
   $('#gm-test').addEventListener('click', async () => {
     $('#gm-status').textContent = 'Asking…';
     try {

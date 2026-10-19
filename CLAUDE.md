@@ -37,7 +37,7 @@ The machine has no Node, Python, or git — tooling is PowerShell + Edge.
 
 ## Architecture
 
-**Routing / views:** `js/app.js` is a hash router (`#/library`, `#/import`, `#/lesson/<id>`, `#/review`, `#/vocab`, `#/stats`, `#/settings`). Each `js/views/*.js` exports `render*(viewEl, arg)` that rebuilds `#view` with template strings and may **return a cleanup function** (removing listeners, revoking object URLs); the router calls it before the next route. Views do not persist across navigation.
+**Routing / views:** `js/app.js` is a hash router (`#/library`, `#/import`, `#/lesson/<id>`, `#/review`, `#/vocab`, `#/stats`, `#/settings`). Each `js/views/*.js` exports `render*(viewEl, arg)` that rebuilds `#view` with template strings and may **return a cleanup function** (removing listeners, revoking object URLs); the router calls it before the next route. Views do not persist across navigation. The router keeps each screen's scroll position (`scrolls`, not for lessons), and `showDueCount()` puts the number of due cards on the Review tab (`data-count`). The app no longer waits for sync before the first route.
 
 **State (`js/state.js`) is the single gateway for word changes.** `state.vocab` is an in-memory `Map(term → word record)` for the **current language only**; it is reloaded by `loadVocab()` when the language changes. Always mutate words through `setStatus` / `setStatusMany` / `saveWord` / `markSeen` / `addLessonToPool` / `removeLessonFromPool` so the map, IndexedDB, and the per-day activity counters (`bumpActivity`) stay consistent. Writing to the `words` store directly desyncs the map and the stats.
 

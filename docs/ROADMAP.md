@@ -75,6 +75,26 @@ this file records where things stand, what the owner decided, and what's next.
   needs (re)deploying. Every "no AI" or "busy" message links there. Keys follow the account: pasted once, they reach the owner's other
   devices through sync (the owner asked for this, 2026-10-19: the app is for family and friends);
   a switch on the card turns that off. They never go into backup files.
+- **Frictionless pass** (2026-10-19). The owner picked 5 of 18 researched ideas and asked for
+  everything "seamless, effortless, no effort outside learning"; three code-walkthrough audits
+  found the rest:
+  - **Picked:** a tapped word scrolls above its panel; Undo after Next page in both modes; a PNG
+    home-screen icon; tap-anywhere review with the grades in one bottom bar; YouTube thumbnail
+    and length on lesson cards.
+  - **Launch:** opens at once (sync in the background, no "synced" toast); scroll kept per
+    screen; no double-tap zoom, tap flash or bounce; a slow page uses the cached version for
+    that launch; status-bar colours.
+  - **Import:** a link pasted or shared on its own opens its lesson by itself; 📋 Paste link
+    in the Library; no captions → Gemini automatically; failures are one line with fix buttons.
+  - **Reader:** tap outside or swipe down closes the panel; Known/Ignore close it; Ignore sits
+    beside the levels; with a video the panel skips the sentence shown above; video resumes
+    where you stopped; the summary opens when the video ends with "Next: …"; ✎ moved into the
+    panel; 44 px controls; fewer toasts; phrase selection pauses at once; read-aloud carries on.
+  - **Review, vocab, settings:** due count on the Review tab; grading doesn't wait for the save;
+    Undo after Known/Ignore; vocab fits a phone; settings show only what applies, rarely used
+    ones under Advanced, no "Saved" toasts.
+  - **Not done yet** (bigger): Gemini transcription that survives leaving Import, and opening
+    a long video before all its parts are transcribed.
 - **Phone**: Capacitor app in `mobile/`, built by GitHub Actions (APK + unsigned IPA,
   docs/MOBILE.md); YouTube captions fetched by the native app (js/youtube.js); file picker
   that iPhones don't grey out; iPhone Shortcut route (docs/IPHONE_SHORTCUT.md). The owner
@@ -92,6 +112,8 @@ this file records where things stand, what the owner decided, and what's next.
 - Optional: free Groq (console.groq.com) and Cohere (dashboard.cohere.com) keys in Settings → AI.
   Mistral no longer gives new accounts free API keys (owner hit this, 2026-10-19).
   Their French translation quality (and Gemma's, Mistral's) has **not** been compared with Gemini yet.
+- Put the Supabase Project URL and public anon key in `js/config.js` (Supabase → Settings → API),
+  so a fresh iPhone shows the login form directly instead of asking for them.
 - Optional: the `transcript` Edge Function (cloud helper) so pasting a link works on iPhone.
 - Optional, Android only: signing key secrets so APK updates keep data (docs/MOBILE.md).
 

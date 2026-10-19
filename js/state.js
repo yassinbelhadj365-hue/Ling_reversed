@@ -88,6 +88,19 @@ function applyStatus(w, status) {
   return d;
 }
 
+// An Undo: puts a word back exactly as it was ({status, srs, ev} saved before the change), with
+// the day's known count moved back too. Going back to a LingQ isn't counted as a new LingQ.
+export async function restoreWord(term, { status, srs, ev }) {
+  const w = getWord(term);
+  if (!w) return;
+  const d = applyStatus(w, status);
+  delete d.lingqs;
+  Object.assign(w, { srs, ev, updatedAt: Date.now() });
+  state.vocab.set(term, w);
+  await db.put('words', w);
+  await bumpActivity(d);
+}
+
 // `manual: true` when the user chose this status (pins it against automatic changes).
 export async function setStatus(term, status, patch = {}, { manual = false } = {}) {
   const w = getWord(term) || newWord(term);

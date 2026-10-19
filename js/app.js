@@ -1,4 +1,5 @@
-import { LANGS, lang, loadSettings, saveSettings, loadVocab, toast } from './state.js';
+import { state, LANGS, lang, loadSettings, saveSettings, loadVocab, toast } from './state.js';
+import { isLearning } from './srs.js';
 import { closePanel } from './panel.js';
 import { renderLibrary } from './views/library.js';
 import { renderImport } from './views/import.js';
@@ -56,7 +57,19 @@ async function route() {
     view.innerHTML = `<div class="empty">Something went wrong: ${String(err.message || err)}</div>`;
   }
   if (name !== 'lesson' && location.hash === hash && !arg) window.scrollTo(0, scrolls.get(hash) || 0);
+  showDueCount();
 }
+
+// The Review tab shows how many cards are due, so there's no need to open it to find out.
+function showDueCount() {
+  const now = Date.now();
+  let n = 0;
+  for (const w of state.vocab.values()) if (isLearning(w.status) && (w.srs?.due ?? 0) <= now) n++;
+  const tab = document.querySelector('.tabbar [data-tab="review"]');
+  if (tab) tab.dataset.count = n > 99 ? '99+' : n ? String(n) : '';
+}
+let dueTimer = null;
+const showDueCountSoon = () => { clearTimeout(dueTimer); dueTimer = setTimeout(showDueCount, 300); };
 
 function showError(msg) {
   document.body.dataset.error = msg;
@@ -108,6 +121,7 @@ async function init() {
       onRemoteChange: async () => {
         await loadSettings();
         await loadVocab();
+        showDueCountSoon();
         const name = location.hash.split('/')[1] || 'library';
         if (['library', 'vocab', 'stats'].includes(name)) route();
       },
@@ -134,6 +148,8 @@ async function init() {
     navigator.serviceWorker.register('sw.js').catch(() => { /* offline mode unavailable */ });
   }
   warmUp().catch(() => {}); // the first word tap shouldn't wait for setup
+  db.onChange((store) => { if (store === 'words') showDueCountSoon(); });
+  setInterval(showDueCount, 60_000); // cards become due as time passes
   document.body.dataset.ready = '1';
 }
 
