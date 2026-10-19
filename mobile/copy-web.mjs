@@ -10,7 +10,7 @@ const www = join(here, 'www');
 
 rmSync(www, { recursive: true, force: true });
 mkdirSync(www, { recursive: true });
-for (const f of ['index.html', 'styles.css', 'manifest.webmanifest', 'icon.svg', 'sw.js', 'js']) {
+for (const f of ['index.html', 'styles.css', 'manifest.webmanifest', 'icon.svg', 'sw.js', 'js', 'data']) {
   cpSync(join(root, f), join(www, f), { recursive: true });
 }
 console.log(`Copied the web app into ${www}`);

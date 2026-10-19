@@ -18,6 +18,7 @@ import { parseShortcut, pickShortcutTrack } from '../js/youtube.js';
 import { lessonLevel, lessonProgress, continueCard } from '../js/views/library.js';
 import { milestoneFor, weekStart, recapOf, checkMilestone, milestoneProgress, milestoneBarHtml } from '../js/progress.js';
 import { parseStamp } from '../js/video-ai.js';
+import { lookupWord, lookupNow } from '../js/dictionary.js';
 import { levelOf, pickTargets } from '../js/story.js';
 import { requestBody, direct, _resetModels, geminiJson, hasProvider, keyKind, setProviderKey, getProviderKey, setKeysSynced } from '../js/ai.js';
 
@@ -351,6 +352,15 @@ try {
   ok(lead.length === 1 && lead[0].said === 'Pero' && lead[0].heard === 'y', 'compareLine: at the line start only the adjacent heard word is suggested');
   const hb = heardBetween([{ start: 8, end: 12, text: 'A' }, { start: 12, end: 16, text: 'B' }], 8, 12);
   ok(hb === 'A', 'heardBetween: a neighbouring cue that barely overlaps is left out');
+
+  // ---- unit: the offline French dictionary (dictionary.js, data/fr-en.tsv) ----
+  const dMange = await lookupWord('mangé', 'fr', 'en');
+  const dEst = await lookupWord('est', 'fr', 'en');
+  const dDe = lookupNow('de', 'fr', 'en');
+  ok(dMange?.[0]?.lemma === 'manger' && /to eat/.test(dMange[0].meaning) && dEst?.[0]?.lemma === 'être' && /of|from/.test(dDe?.[0]?.meaning)
+    && lookupNow('zzzzqx', 'fr', 'en') === null && (await lookupWord('comer', 'es', 'en')) === null,
+    'offline dictionary: forms lead to their dictionary word (mangé → manger, est → être), grammar words first, French only: '
+    + JSON.stringify([dMange?.[0], dEst?.[0], dDe?.[0]]));
 
   // ---- unit: explanation prompts (explain.js) ----
   const longT = Array.from({ length: 2000 }, (_, k) => `Línea ${k}.`).join(' ');
@@ -897,6 +907,8 @@ try {
 
   // ---- a page's words are looked up in the background, so a tap answers at once ----
   delete W().__lingoNoPrefetch;
+  const lookState = (await W().eval("import('/js/state.js')")).state;
+  lookState.settings.lookAhead = true; // off by default (it uses more of the free limit)
   const batchCalls = () => aiCalls.filter((c) => c.background);
   const batchesBefore = batchCalls().length;
   W().location.hash = '#/library';
@@ -912,6 +924,7 @@ try {
     && aiCalls.length === tapsBefore && /\[EN\] Es feliz\./.test(D().querySelector('#word-panel').textContent),
     'the page’s new words are looked up together in the background; a tap then answers from them with no AI call');
   W().__lingoNoPrefetch = true;
+  lookState.settings.lookAhead = false;
   D().querySelector('#word-panel .close, #word-panel [data-act="close"]')?.click();
 
   // ---- read aloud: sentence by sentence, the spoken word highlighted (fake speech engine) ----
@@ -1241,6 +1254,15 @@ try {
   appPanel.openPanel('casa', { context: 'Esta casa es grande.' });
   ok(D().querySelector('#word-panel [data-act="explain"]') && aiCalls.length === callsBefore, 'with automatic answers off, the panel waits for the button');
   appPanel.closePanel();
+  // French: the offline dictionary's meaning shows at once, before (or without) the AI.
+  const savedLang = appState.state.settings.lang;
+  appState.state.settings.lang = 'fr';
+  appPanel.openPanel('mangé', { context: "J'ai mangé une pomme." });
+  await until(() => /to eat \(manger\)/.test(D().querySelector('#word-panel').textContent), 8000);
+  ok(/to eat \(manger\)/.test(D().querySelector('#word-panel .meaning.guess')?.textContent || '') && /Dictionary/.test(D().querySelector('#word-panel').textContent),
+    'French: a tapped word shows its offline dictionary meaning at once (“mangé” → “to eat (manger)”)');
+  appPanel.closePanel();
+  appState.state.settings.lang = savedLang;
   appState.state.settings.aiAuto = true;
 
   ok(!D().body.dataset.error, 'no runtime errors: ' + (D().body.dataset.error || 'none'));

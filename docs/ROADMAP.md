@@ -64,6 +64,11 @@ this file records where things stand, what the owner decided, and what's next.
   live): each page's new and LingQ words (listen mode: the next 8 lines) are looked up in the
   background in batches, so a tap reads a saved answer. Uses more of the free limit; a Settings
   switch turns it off. Words tapped before their batch is back still take a second or two.
+- **Offline French dictionary** (2026-10-19, owner asked, French only to save the AI limit):
+  a tapped French word shows its Wiktionary meaning greyed at once (js/dictionary.js,
+  data/fr-en.tsv, ~396k word forms, 10 MB / ~2 MB compressed), replaced by the AI's meaning in
+  the sentence. Background look-ahead is now off by default (Settings switch). Translation
+  websites were measured slower than the AI (MyMemory 1.7 s, Lingva 1 s, Google blocked).
 - **AI setup in one place** (Settings → AI, 2026-10-19): "Get a free key ↗" per AI, one
   📋 Paste a key button that recognizes Gemini/Mistral/Groq keys and checks them at once, a ✓/✗
   status per AI, and the shared server's state with copy-the-code / open-Supabase steps when it

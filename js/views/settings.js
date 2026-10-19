@@ -201,8 +201,12 @@ function aiCardHtml(s) {
         <span class="small muted">The list needs your Gemini key. When this model’s free limit is used up or Google is busy, the other free Flash models answer by themselves, then Gemma (weaker, but rarely busy), then your backups.</span></div>
       <label class="row"><input type="checkbox" data-bool="aiAuto" ${s.aiAuto ? 'checked' : ''}>
         Ask automatically when I tap (otherwise there’s an Explain button, which saves the daily limit)</label>
-      <label class="row"><input type="checkbox" data-bool="aiPrefetch" ${s.aiPrefetch ? 'checked' : ''}>
+      <label class="row"><input type="checkbox" data-bool="lookAhead" ${s.lookAhead ? 'checked' : ''}>
         Look up each page’s new words in advance, so taps answer instantly (uses more of the free limit)</label>
+      <p class="small muted">French words show a dictionary meaning at once, offline, until the AI’s meaning in the sentence
+        arrives. Dictionary: <a href="https://en.wiktionary.org/" target="_blank" rel="noopener">Wiktionary</a>
+        (<a href="https://creativecommons.org/licenses/by-sa/4.0/" target="_blank" rel="noopener">CC BY-SA 4.0</a>),
+        via <a href="https://kaikki.org/" target="_blank" rel="noopener">kaikki.org</a>.</p>
       <div class="row"><button class="btn small" id="gm-test">Test a lookup</button><span id="gm-status" class="small muted"></span></div>
       <p class="small muted">“More” in the word panel asks the same AI for a longer answer. It can also open DeepSeek or ChatGPT
         (your own subscription) with the question ready.</p>

@@ -9,6 +9,7 @@ import { progress } from './knowledge.js';
 import { sentenceLinks } from './ai.js';
 import { tokenize, contextAt } from './text.js';
 import { explain } from './explain.js';
+import { hasDictionary, lookupNow, lookupWord } from './dictionary.js';
 import { openChatGpt, openDeepSeek, copyText } from './assist.js';
 
 const UNDO_WINDOW = 10 * 60 * 1000;
@@ -27,8 +28,18 @@ export function openPanel(term, {
 } = {}) {
   current = {
     term, mode, context, mark, around, flag, transcript, onFlag, onChange, onClose,
-    explain: null, deep: null, handoff: null, newSense: null,
+    explain: null, deep: null, handoff: null, newSense: null, dict: null,
   };
+  // The offline dictionary's meaning shows at once; the AI's meaning in this sentence replaces it.
+  if (mode === 'word' && !term.includes(' ') && hasDictionary(lang(), state.settings.native)) {
+    const me = current;
+    me.dict = lookupNow(term, lang(), state.settings.native);
+    if (!me.dict) {
+      lookupWord(term, lang(), state.settings.native).then((d) => {
+        if (d && stillOpen(me) && me.explain?.state !== 'done') { me.dict = d; renderDynamic(); }
+      });
+    }
+  }
   render();
   panel.hidden = false;
   loadExplain();
@@ -235,6 +246,13 @@ function expressionTerm(r) {
   return terms.length >= 2 && term !== current.term ? term : '';
 }
 
+// The offline dictionary's meanings (dictionary.js), until the AI's meaning in this sentence arrives.
+function dictHtml(note = 'not checked against this sentence') {
+  if (!current.dict) return '';
+  const text = current.dict.map((d) => (d.lemma ? `${d.meaning} (${d.lemma})` : d.meaning)).join(' · ');
+  return `<p class="meaning guess" dir="auto">${esc(text)}</p><p class="small muted">📖 Dictionary · ${note}</p>`;
+}
+
 // The quick answer: the meaning here, big; a short explanation in the target language;
 // the sentence with its translation; one-tap links to the dictionary form and expression.
 function answerAreaHtml() {
@@ -242,18 +260,21 @@ function answerAreaHtml() {
   if (!current.context) return '';
   const isWord = current.mode === 'word';
   if (!x || x.state === 'loading') {
-    return `<div class="meaning skeleton" aria-label="Loading"></div>${isWord ? '<div class="meaning-target skeleton short"></div>' : ''}
+    const meaning = current.dict
+      ? dictHtml('checking the meaning in this sentence…')
+      : '<div class="meaning skeleton" aria-label="Loading"></div>';
+    return `${meaning}${isWord && !current.dict ? '<div class="meaning-target skeleton short"></div>' : ''}
       ${sentenceHtml('<p class="ctx-tr muted" id="ctx-tr">Translating…</p>')}`;
   }
-  if (x.state === 'idle') return `<button class="btn primary" data-act="explain">Translate</button>${sentenceHtml('')}`;
+  if (x.state === 'idle') return `${dictHtml()}<button class="btn primary" data-act="explain">Translate</button>${sentenceHtml('')}`;
   if (x.state === 'none') {
-    return `<p class="small muted">No AI is set up yet: <a href="#/settings/ai">set it up (about a minute, free)</a>, or log in
+    return `${dictHtml()}<p class="small muted">No AI is set up yet: <a href="#/settings/ai">set it up (about a minute, free)</a>, or log in
       to your account (top right). Meanwhile: ${linksHtml()}</p>${sentenceHtml('')}`;
   }
   if (x.state === 'error') {
     // Busy or used up: a backup AI would have answered.
     const fix = /busy|limit/i.test(x.msg) ? ` <a href="#/settings/ai">Add a free backup AI</a>` : '';
-    return `<p class="small">${esc(x.msg)}${fix}</p><div class="row"><button class="btn small" data-act="explain">Try again</button>
+    return `${dictHtml()}<p class="small">${esc(x.msg)}${fix}</p><div class="row"><button class="btn small" data-act="explain">Try again</button>
       <span class="small">${linksHtml()}</span></div>${sentenceHtml('')}`;
   }
   const r = x.result || {};

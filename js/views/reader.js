@@ -17,6 +17,7 @@ import { translateSentence, ERROR_TEXT } from '../ai.js';
 import { NEW, KNOWN, isLearning } from '../srs.js';
 import { openPanel, closePanel, panelTerm } from '../panel.js';
 import { prefetch } from '../explain.js';
+import { loadDictionary } from '../dictionary.js';
 import { createPlayer } from '../player.js';
 import { buildTimeline, activeIndex, charAt } from '../sync.js';
 import { fetchYouTubeAudio, decodeAudio, transcribe, progressText, AUDIO_ERRORS } from '../asr.js';
@@ -58,6 +59,7 @@ function statusClass(term) {
 }
 
 export async function renderReader(view, id) {
+  loadDictionary(state.settings.lang, state.settings.native); // offline meanings, ready for the first tap
   const lesson = await db.get('lessons', decodeURIComponent(id || ''));
   if (!lesson) {
     view.innerHTML = '<div class="empty">This lesson no longer exists. <a href="#/library">Back to library</a></div>';
@@ -695,7 +697,7 @@ export async function renderReader(view, id) {
   // The new and LingQ words of these lines are looked up in the background, with the same
   // context a tap would use, so tapping them shows the answer at once (explain.js prefetch).
   function prefetchLines(indices) {
-    if (!state.settings.aiAuto || !state.settings.aiPrefetch || window.__lingoNoPrefetch) return null;
+    if (!state.settings.aiAuto || !state.settings.lookAhead || window.__lingoNoPrefetch) return null;
     const items = [], seen = new Set();
     for (const i of indices) {
       const p = reader.querySelector(`p.cue[data-i="${i}"]`);
