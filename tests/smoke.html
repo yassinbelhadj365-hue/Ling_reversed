@@ -19,7 +19,7 @@ import { lessonLevel, lessonProgress, continueCard } from '../js/views/library.j
 import { milestoneFor, weekStart, recapOf, checkMilestone, milestoneProgress, milestoneBarHtml } from '../js/progress.js';
 import { parseStamp } from '../js/video-ai.js';
 import { levelOf, pickTargets } from '../js/story.js';
-import { requestBody, direct, _resetModels, geminiJson, hasProvider, keyKind } from '../js/ai.js';
+import { requestBody, direct, _resetModels, geminiJson, hasProvider, keyKind, setProviderKey, getProviderKey, setKeysSynced } from '../js/ai.js';
 
 // A scriptable stand-in for the YouTube/media player (js/player.js test hook).
 function makeFakePlayer() {
@@ -1009,6 +1009,7 @@ try {
   await db.put('words', { key: 'es|mundo', lang: 'es', term: 'mundo', status: 2, hint: 'world', lessons: ['lA'] });
   await db.setSetting('settings', { lang: 'es', native: 'en', dailyGoal: 33 });
   await db.setSetting('secret:openrouter', 'sk-should-stay-here');
+  await setProviderKey('mistral', 'mk-family'); // pasted once on the computer
   await cloud.syncNow();
   ok(cloud.status.state === 'ok', 'device A synced: ' + cloud.status.state + ' ' + cloud.status.error);
 
@@ -1019,7 +1020,12 @@ try {
   const bLesson = await db.get('lessons', 'lA'), bWord = await db.get('words', 'es|mundo');
   ok(bLesson?.segments[0].text === 'Hola mundo.' && bWord?.hint === 'world' && (await db.getSetting('settings')).dailyGoal === 33,
     'device B receives lessons, transcripts, words and settings');
-  ok(!(await db.getSetting('secret:openrouter')), 'API keys are not synced');
+  ok(!(await db.getSetting('secret:openrouter')), 'device-only rows are not synced');
+  ok((await getProviderKey('mistral')) === 'mk-family' && !(await db.exportAll()).data.kv.some((r) => r.key === 'aikeys'),
+    'an AI key pasted on the computer reaches the phone, and never goes into backup files');
+  await setKeysSynced(false);
+  ok(!(await getProviderKey('mistral')), 'with key sharing off, the phone only uses keys typed on it');
+  await setKeysSynced(true);
 
   // B changes the word (newer), A deletes the lesson: each device gets the other's change
   await new Promise((r) => setTimeout(r, 5));

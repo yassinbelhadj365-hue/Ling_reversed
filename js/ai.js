@@ -19,9 +19,35 @@ const GEMMA_MODELS = ['gemma-4-26b-a4b-it', 'gemma-4-31b-it', 'gemma-3-27b-it'];
 const isGemma = (id) => /^gemma-/.test(id);
 const CACHE_DAYS = 60;
 
-// Each provider's key, on this device only (kv `secret:<provider>`).
-export const getProviderKey = (id) => db.getSetting(`secret:${id}`, '');
-export const setProviderKey = (id, k) => db.setSetting(`secret:${id}`, k.trim());
+// Each provider's key is kept on this device (kv `secret:<provider>`) and, unless the user
+// turns it off, copied to the synced kv row `aikeys` ({on, gemini, mistral, groq}) so the other
+// devices of the same account get it (the owner chose this: the app is for family and friends).
+// `aikeys` never goes into backup files. A key typed on this device wins.
+const SYNCED_KEYS = 'aikeys';
+const KEY_IDS = ['gemini', 'mistral', 'groq'];
+const syncedKeys = () => db.getSetting(SYNCED_KEYS, null);
+export async function getProviderKey(id) {
+  const own = await db.getSetting(`secret:${id}`, '');
+  if (own) return own;
+  const shared = await syncedKeys();
+  return (shared?.on !== false && shared?.[id]) || '';
+}
+export async function setProviderKey(id, k) {
+  await db.setSetting(`secret:${id}`, k.trim());
+  const shared = await syncedKeys();
+  if (shared?.on !== false) await db.setSetting(SYNCED_KEYS, { ...shared, on: true, [id]: k.trim() });
+}
+export const keysSynced = async () => (await syncedKeys())?.on !== false;
+// On: copies this device's keys to the account (keeping keys other devices added). Off: removes
+// them from the account; every device keeps only the keys typed on it.
+export async function setKeysSynced(on) {
+  const shared = (await syncedKeys()) || {};
+  if (!on) return db.setSetting(SYNCED_KEYS, { on: false });
+  const keys = { ...shared, on: true };
+  for (const id of KEY_IDS) keys[id] = (await db.getSetting(`secret:${id}`, '')) || (shared.on !== false && shared[id]) || '';
+  if (KEY_IDS.every((id) => keys[id] === shared[id]) && shared.on === true) return; // nothing new to send
+  return db.setSetting(SYNCED_KEYS, keys);
+}
 export const getKey = () => getProviderKey('gemini');
 export const setKey = (k) => setProviderKey('gemini', k);
 

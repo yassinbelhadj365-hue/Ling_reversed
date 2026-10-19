@@ -1,6 +1,8 @@
 import * as db from '../db.js';
 import { state, LANGS, lang, langName, saveSettings, loadSettings, loadVocab, toast, download, esc } from '../state.js';
-import { getKey, listModels, PROVIDERS, getProviderKey, setProviderKey, keyKind, testProvider, sharedStatus, dashboardUrl } from '../ai.js';
+import { getKey, listModels, PROVIDERS, getProviderKey, setProviderKey, keyKind, testProvider, sharedStatus, dashboardUrl,
+  keysSynced, setKeysSynced } from '../ai.js';
+import { activeAccount, isSignedIn } from '../cloud.js';
 import { hash32 } from '../text.js';
 import { explain } from '../explain.js';
 import { MODELS as ASR_MODELS } from '../asr.js';
@@ -174,7 +176,7 @@ function aiCardHtml(s) {
     <div class="card" id="ai-card">
       <h2 style="margin-top:0">AI for translations</h2>
       <p class="small muted">Each tap asks a free AI what the word means in its sentence. Gemini answers first; Mistral and Groq
-        answer when Google is busy. All three are free with no card and take about a minute each. Keys stay on this device.</p>
+        answer when Google is busy. All three are free with no card and take about a minute each.</p>
       <div class="row"><button class="btn primary" id="key-paste">📋 Paste a key</button>
         <span class="small muted" id="key-paste-st">Copied a key? Tap here: the app sees which AI it’s for and checks it.</span></div>
       ${PROVIDERS.map((p, i) => `
@@ -188,6 +190,8 @@ function aiCardHtml(s) {
           <button class="btn small" data-test="${p.id}">Test</button>
         </div>
       </div>`).join('')}
+      <label class="row ai-row" id="keysync-row" hidden><span><input type="checkbox" id="keysync">
+        Use these keys on all my devices: paste them once, and your phone and computer get them when they sync</span></label>
       <div class="ai-row" id="shared-row" hidden></div>
       <div class="field" style="margin-top:12px"><label for="gm-model">Gemini model</label>
         <select id="gm-model"><option value="">Automatic (newest free Flash model)</option></select>
@@ -233,6 +237,22 @@ function initAiCard(view, arg) {
     await refresh(kind);
     if (text.trim()) await check(kind);
     return kind;
+  }
+
+  // Keys follow the account to its other devices (on unless turned off). Opening this card also
+  // shares keys typed before that existed.
+  const acc = activeAccount();
+  if (acc && isSignedIn(acc)) {
+    $('#keysync-row').hidden = false;
+    keysSynced().then(async (on) => {
+      $('#keysync').checked = on;
+      if (on) await setKeysSynced(true);
+    });
+    $('#keysync').addEventListener('change', async (e) => {
+      await setKeysSynced(e.target.checked);
+      PROVIDERS.forEach((p) => refresh(p.id));
+      toast(e.target.checked ? 'Your keys will reach your other devices when they sync' : 'Keys now stay on each device');
+    });
   }
 
   PROVIDERS.forEach((p) => refresh(p.id));

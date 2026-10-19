@@ -18,6 +18,8 @@ const BASE_NAME = 'lingo-reader';
 const DB_VERSION = 2;
 export const SYNCED = ['lessons', 'words', 'activity', 'kv'];
 const DEVICE_ONLY_KV = /^(secret:|local:)/;
+// Never in backup files: device-only rows, and the API keys shared between the account's devices.
+const NOT_IN_BACKUP_KV = /^(secret:|local:|aikeys$)/;
 
 let dbName = BASE_NAME;
 let dbPromise = null;
@@ -214,13 +216,13 @@ export const isSyncedKv = (key) => !DEVICE_ONLY_KV.test(key);
 export async function exportAll() {
   const out = {};
   for (const name of ['lessons', 'words', 'activity', 'kv']) out[name] = await all(name);
-  out.kv = out.kv.filter((row) => !DEVICE_ONLY_KV.test(row.key)); // API keys never leave this browser
+  out.kv = out.kv.filter((row) => !NOT_IN_BACKUP_KV.test(row.key)); // API keys never go into a file
   return { app: 'lingo-reader', version: 2, exportedAt: new Date().toISOString(), data: out };
 }
 export async function importAll(backup) {
   if (backup?.app !== 'lingo-reader' || !backup.data) throw new Error('Not a Lingo Reader backup file.');
   for (const [name, rows] of Object.entries(backup.data)) {
-    if (['lessons', 'words', 'activity', 'kv'].includes(name)) await putMany(name, rows);
+    if (['lessons', 'words', 'activity', 'kv'].includes(name)) await putMany(name, name === 'kv' ? rows.filter((r) => !NOT_IN_BACKUP_KV.test(r.key)) : rows);
   }
 }
 

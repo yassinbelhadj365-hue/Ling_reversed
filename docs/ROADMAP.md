@@ -60,9 +60,9 @@ this file records where things stand, what the owner decided, and what's next.
 - **AI setup in one place** (Settings → AI, 2026-10-19): "Get a free key ↗" per AI, one
   📋 Paste a key button that recognizes Gemini/Mistral/Groq keys and checks them at once, a ✓/✗
   status per AI, and the shared server's state with copy-the-code / open-Supabase steps when it
-  needs (re)deploying. Every "no AI" or "busy" message links there. Keys still have to be
-  entered on each device: copying them through the sync server was blocked as a security
-  risk and is waiting for the owner's decision.
+  needs (re)deploying. Every "no AI" or "busy" message links there. Keys follow the account: pasted once, they reach the owner's other
+  devices through sync (the owner asked for this, 2026-10-19: the app is for family and friends);
+  a switch on the card turns that off. They never go into backup files.
 - **Phone**: Capacitor app in `mobile/`, built by GitHub Actions (APK + unsigned IPA,
   docs/MOBILE.md); YouTube captions fetched by the native app (js/youtube.js); file picker
   that iPhones don't grey out; iPhone Shortcut route (docs/IPHONE_SHORTCUT.md). The owner
