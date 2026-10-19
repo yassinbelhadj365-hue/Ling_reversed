@@ -4,7 +4,8 @@
 //      (kv `secret:gemini`, never synced or backed up), called directly.
 //   2. The shared key of the sync server's `ai` Edge Function
 //      (supabase/functions/ai/index.ts), for signed-in users with no key of their own.
-// Free-tier models only; nothing here can spend money.
+// When Gemini is busy or used up, the user's optional free Mistral or Groq key answers instead
+// (BACKUPS). Free-tier models only; nothing here can spend money.
 import * as db from './db.js';
 import { state, langName } from './state.js';
 import { hash32 } from './text.js';
@@ -12,7 +13,11 @@ import { callFunction, cloudConfig, activeAccount, isSignedIn } from './cloud.js
 
 const API = 'https://generativelanguage.googleapis.com/v1beta';
 const KEY_ROW = 'secret:gemini';
-export const FALLBACK_MODEL = 'gemini-2.5-flash';
+export const FALLBACK_MODEL = 'gemini-3.6-flash';
+// Gemma runs on the same key with its own free limit, so it can still answer when every Flash
+// model is busy. It is weaker, so it comes last. Preferred first.
+const GEMMA_MODELS = ['gemma-4-26b-a4b-it', 'gemma-4-31b-it', 'gemma-3-27b-it'];
+const isGemma = (id) => /^gemma-/.test(id);
 const CACHE_DAYS = 60;
 
 export const getKey = () => db.getSetting(KEY_ROW, '');
@@ -31,12 +36,12 @@ export async function listModels(key) {
   const { models = [] } = await res.json();
   const rank = (id) => {
     const v = version(id);
-    return v ? -(v[0] * 100 + v[1]) * 2 + v[2] : 1000; // stable flash first, lite after the full model
+    return v ? -(v[0] * 100 + v[1]) * 2 + v[2] : isGemma(id) ? 2000 : 1000; // stable flash first, lite after the full model, Gemma last
   };
   return models
     .filter((m) => (m.supportedGenerationMethods || []).includes('generateContent'))
     .map((m) => ({ id: m.name.replace(/^models\//, ''), name: m.displayName || m.name }))
-    .filter((m) => /^gemini-/.test(m.id) && !/embedding|image|tts|audio|live|vision/i.test(m.id))
+    .filter((m) => (/^gemini-/.test(m.id) || GEMMA_MODELS.includes(m.id)) && !/embedding|image|tts|audio|live|vision/i.test(m.id))
     .sort((a, b) => rank(a.id) - rank(b.id) || a.id.localeCompare(b.id));
 }
 
@@ -69,17 +74,36 @@ function nextDailyReset() {
   return +d;
 }
 const isDaily = (data) => /PerDay/i.test(JSON.stringify(data.error?.details || []));
+// A per-minute limit says how long to wait ("14s").
+const retryDelay = (data) => {
+  const d = (data.error?.details || []).find((x) => x.retryDelay)?.retryDelay;
+  return d ? Math.max(10, parseFloat(d) || 0) * 1000 : 60_000;
+};
+// Google's servers are overloaded ("high demand"): not the user's limit, and usually brief.
+const BUSY = new Set([500, 502, 503, 504]);
+const isBusy = (status) => BUSY.has(status);
+// When to try a model again after this error.
+function skipUntil(status, data) {
+  if (status === 404 || (status === 429 && isDaily(data))) return nextDailyReset();
+  if (status === 429) return Date.now() + retryDelay(data);
+  return Date.now() + 60_000; // busy
+}
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-// -> model ids to try, in order: the chosen or automatic one, then the other stable Flash models.
-async function modelsToTry(key) {
+// -> model ids to try, in order: the chosen or automatic one, the other stable Flash models,
+// then Gemma (not for videos: it can't watch them).
+async function modelsToTry(key, req = {}) {
   const first = await pickModel(key);
-  let rest = [];
-  try { rest = (await modelsOf(key)).map((m) => m.id).filter((id) => version(id) && id !== first); } catch { /* offline: just the first */ }
-  const open = [first, ...rest].filter((id) => !(spent.get(id) > Date.now()));
-  return (open.length ? open : [first]).slice(0, MAX_MODELS);
+  let ids = [];
+  try { ids = (await modelsOf(key)).map((m) => m.id); } catch { /* offline: just the first */ }
+  const open = (id) => !(spent.get(id) > Date.now());
+  const flash = [first, ...ids.filter((id) => version(id) && id !== first)].filter(open);
+  const gemma = req.video ? null : GEMMA_MODELS.find((id) => ids.includes(id) && id !== first && open(id));
+  return [...(flash.length || gemma ? flash : [first]).slice(0, MAX_MODELS), ...(gemma ? [gemma] : [])];
 }
 
 function errorText(status, msg = '') {
+  if (isBusy(status)) return 'Google’s AI is busy right now (many people are using it). Try again in a minute, or add a free Mistral or Groq key in Settings as a backup.';
   if (status === 429) return 'Today’s free AI limit is used up (or too many taps in a minute). Wait a little, or add your own free key in Settings.';
   if (status === 400 && /API key/i.test(msg)) return 'Google rejected the AI key. Check it in Settings.';
   if (status === 401 || status === 403) return 'Google rejected the AI key. Check it in Settings.';
@@ -111,8 +135,28 @@ export function videoPart(video) {
   return [{ fileData: { fileUri: video.url }, ...clip }];
 }
 
+// A Gemini schema as an example of the JSON wanted, for models that can't take a schema
+// (Gemma, the backups): {type: OBJECT, properties: {a: STRING}} -> '{"a":""}'.
+function shapeOf(s) {
+  if (!s) return '';
+  if (s.type === 'OBJECT') return Object.fromEntries(Object.entries(s.properties || {}).map(([k, v]) => [k, shapeOf(v)]));
+  if (s.type === 'ARRAY') return [shapeOf(s.items)];
+  if (s.type === 'INTEGER' || s.type === 'NUMBER') return 0;
+  if (s.type === 'BOOLEAN') return false;
+  return '';
+}
+export const jsonShape = (schema) => !schema ? '\n\nReply with JSON only.'
+  : `\n\nReply with JSON only, exactly this shape with every field filled in:\n${JSON.stringify(shapeOf(schema))}`;
+
 // The request body Gemini expects (supabase/functions/ai builds the same one).
 export function requestBody({ system, user, schema, fast = false, video = null, temperature = 0 }, model = '') {
+  // Gemma takes no system instruction, JSON mode or schema: all of it goes into the text.
+  if (isGemma(model)) {
+    return {
+      contents: [{ role: 'user', parts: [{ text: `${system}${jsonShape(schema)}\n\n${user}` }] }],
+      generationConfig: { temperature },
+    };
+  }
   const thinking = fast && thinkingLight(model);
   return {
     systemInstruction: { parts: [{ text: system }] },
@@ -149,12 +193,19 @@ async function ask(key, model, req) {
 }
 
 // One answer with the user's own key. -> {result, model}
+// Used-up, missing or busy models are skipped for a while and the next one answers; a busy
+// model gets one quick second try first (a tap is waiting, so only once per answer).
 export async function direct(key, req) {
-  let failed = null;
-  for (const model of await modelsToTry(key)) {
-    const { res, data } = await ask(key, model, req);
-    if (res.status === 429 || res.status === 404) {
-      spent.set(model, res.status === 404 || isDaily(data) ? nextDailyReset() : Date.now() + 60_000);
+  let failed = null, retried = false;
+  for (const model of await modelsToTry(key, req)) {
+    let { res, data } = await ask(key, model, req);
+    if (isBusy(res.status) && !retried) {
+      retried = true;
+      await sleep(window.__lingoBusyWait ?? 800 + Math.random() * 400);
+      ({ res, data } = await ask(key, model, req));
+    }
+    if (res.status === 429 || res.status === 404 || isBusy(res.status)) {
+      spent.set(model, skipUntil(res.status, data));
       failed ||= { res, data };
       continue;
     }
@@ -180,19 +231,68 @@ async function shared(req) {
 // The shared key is only for people logged in to this sync server.
 const canShare = () => { const a = activeAccount(); return !!(cloudConfig() && a && isSignedIn(a)); };
 
-// Is any AI reachable without asking the user for anything?
-export async function hasProvider() {
-  return !!(window.__lingoGemini || (await getKey()) || canShare());
+// ---------- backups: other free AIs with the user's own key ----------
+// Both have a free tier without a card, accept calls from a browser and speak the OpenAI
+// chat format. They can't watch videos. Keys stay on this device like the Gemini one.
+export const BACKUPS = [
+  { id: 'mistral', name: 'Mistral', url: 'https://api.mistral.ai/v1/chat/completions', model: 'mistral-small-latest',
+    keyUrl: 'https://console.mistral.ai/api-keys' },
+  { id: 'groq', name: 'Groq', url: 'https://api.groq.com/openai/v1/chat/completions', model: 'openai/gpt-oss-120b',
+    extra: { reasoning_effort: 'low' }, keyUrl: 'https://console.groq.com/keys' },
+];
+export const getBackupKey = (id) => db.getSetting(`secret:${id}`, '');
+export const setBackupKey = (id, k) => db.setSetting(`secret:${id}`, k.trim());
+const backupsWithKeys = async () =>
+  (await Promise.all(BACKUPS.map(async (p) => ({ p, key: await getBackupKey(p.id) })))).filter((b) => b.key);
+
+// One answer from a backup. -> {result, model}
+export async function backup(p, key, { system, user, schema, temperature = 0 }) {
+  let res, data;
+  try {
+    res = await fetch(p.url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
+      body: JSON.stringify({
+        model: p.model, temperature, response_format: { type: 'json_object' }, ...p.extra,
+        messages: [{ role: 'system', content: system + jsonShape(schema) }, { role: 'user', content: user }],
+      }),
+    });
+    data = await res.json().catch(() => ({}));
+  } catch {
+    throw new Error(`Couldn’t reach ${p.name} (offline?).`);
+  }
+  if (!res.ok) {
+    if (res.status === 429 || isBusy(res.status)) spent.set(p.id, Date.now() + 60_000);
+    const msg = res.status === 401 || res.status === 403 ? `${p.name} rejected its key. Check it in Settings.`
+      : res.status === 429 ? `${p.name}’s free limit is used up for now.`
+      : isBusy(res.status) ? `${p.name} is busy right now.`
+      : `${p.name} error (${res.status})${data.error?.message ? `: ${data.error.message}` : ''}`;
+    throw new Error(msg);
+  }
+  return { result: parseJsonReply(data.choices?.[0]?.message?.content), model: p.model.replace(/^.*\//, '') };
 }
 
-// One JSON answer from Gemini. -> {result, model}
-// Throws Error('no-provider') when there is neither a key nor a sync server.
+// Is any AI reachable without asking the user for anything? (Videos need Gemini.)
+export async function hasProvider({ video = false } = {}) {
+  return !!(window.__lingoGemini || (await getKey()) || canShare() || (!video && (await backupsWithKeys()).length));
+}
+
+// One JSON answer: Gemini, else (busy, used up, any failure) the backups in order. -> {result, model}
+// Throws Error('no-provider') when nothing is set up; otherwise Gemini's error comes first.
 export async function geminiJson(req) {
   if (window.__lingoGemini) return window.__lingoGemini(req); // smoke-test hook
   const key = await getKey();
-  if (key) return direct(key, req);
-  if (canShare()) return shared(req);
-  throw new Error('no-provider');
+  let error = null;
+  if (key || canShare()) {
+    try { return await (key ? direct(key, req) : shared(req)); } catch (err) { error = err; }
+  }
+  if (!req.video) {
+    for (const { p, key: k } of await backupsWithKeys()) {
+      if (spent.get(p.id) > Date.now()) continue;
+      try { return await backup(p, k, req); } catch (err) { error ||= err; }
+    }
+  }
+  throw error || new Error('no-provider');
 }
 
 export const sourceLabel = (model) => `${model || 'Gemini'} (free)`;
@@ -219,7 +319,7 @@ export async function translateSentence(text, from, to) {
     result = { text: String(r.translation || '').trim(), source: sourceLabel(model) };
   } catch (err) {
     if (err.message === 'no-provider') return { error: 'none' };
-    return { error: /limit/i.test(err.message) ? 'quota' : 'unavailable', msg: err.message };
+    return { error: /limit/i.test(err.message) ? 'quota' : /busy/i.test(err.message) ? 'busy' : 'unavailable', msg: err.message };
   }
   if (result.text) await db.put('dict', { key, result, at: Date.now() });
   return result;
@@ -227,6 +327,7 @@ export async function translateSentence(text, from, to) {
 
 export const ERROR_TEXT = {
   quota: 'Today’s free AI limit is used up. Try again later, or add your own free key in Settings.',
+  busy: 'Google’s AI is busy right now. Try again in a minute, or add a free Mistral or Groq key in Settings as a backup.',
   unavailable: 'Translation unavailable right now (offline?).',
   none: 'No AI is set up yet: add a free Gemini key in Settings, or log in to your account.',
 };

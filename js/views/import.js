@@ -277,7 +277,7 @@ export async function renderImport(view, arg) {
     const id = youTubeId($('#yt').value.trim());
     if (!id) return status('Paste a YouTube link first.');
     if (!(await serverCaps()).transcripts) {
-      if (await hasProvider()) return fetchTranscript('', { ai: true });
+      if (await hasProvider({ video: true })) return fetchTranscript('', { ai: true });
       if (canRelay()) return relay('asr');
       return explainNoServer();
     }

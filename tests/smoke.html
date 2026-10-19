@@ -19,7 +19,7 @@ import { lessonLevel, lessonProgress, continueCard } from '../js/views/library.j
 import { milestoneFor, weekStart, recapOf, checkMilestone, milestoneProgress, milestoneBarHtml } from '../js/progress.js';
 import { parseStamp } from '../js/video-ai.js';
 import { levelOf, pickTargets } from '../js/story.js';
-import { requestBody, direct, _resetModels } from '../js/ai.js';
+import { requestBody, direct, _resetModels, geminiJson, hasProvider } from '../js/ai.js';
 
 // A scriptable stand-in for the YouTube/media player (js/player.js test hook).
 function makeFakePlayer() {
@@ -158,6 +158,55 @@ try {
   ok(fb1.model === 'gemini-2.5-flash-lite' && fb1.result.translation === 'ok' && fb2.model === 'gemini-2.5-flash-lite'
     && asked.join() === 'gemini-2.5-flash,gemini-2.5-flash-lite,gemini-2.5-flash-lite',
     'when Flash’s daily free limit is used up, Flash-Lite answers, and Flash is skipped until it resets: ' + asked);
+  // Google is busy (503) on every Flash model: one quick second try, the next Flash model, then Gemma.
+  const busyAsked = [], googleList = { models: ['gemini-3.6-flash', 'gemini-3.6-flash-lite', 'gemma-4-26b-a4b-it'].map((id) =>
+    ({ name: `models/${id}`, supportedGenerationMethods: ['generateContent'] })) };
+  const busy = () => new Response(JSON.stringify({ error: { code: 503, message: 'This model is currently experiencing high demand.' } }), { status: 503 });
+  let gemmaBody = null;
+  window.__lingoBusyWait = 0;
+  window.fetch = async (url, opts) => {
+    const u = String(url);
+    if (/\/models\?/.test(u)) return new Response(JSON.stringify(googleList));
+    const m = /models\/([^:]+):generateContent/.exec(u)[1];
+    busyAsked.push(m);
+    if (!/^gemma/.test(m)) return busy();
+    gemmaBody = JSON.parse(opts.body);
+    return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: '```json\n{"translation":"g"}\n```' }] } }] }));
+  };
+  _resetModels();
+  const gb = await direct('k', { system: 'sys', user: 'u', schema: { type: 'OBJECT', properties: { translation: { type: 'STRING' } } } });
+  ok(gb.model === 'gemma-4-26b-a4b-it' && gb.result.translation === 'g'
+    && busyAsked.join() === 'gemini-3.6-flash,gemini-3.6-flash,gemini-3.6-flash-lite,gemma-4-26b-a4b-it'
+    && !gemmaBody.systemInstruction && !gemmaBody.generationConfig.responseMimeType && /"translation":""/.test(gemmaBody.contents[0].parts[0].text),
+    'when Google is busy: one retry, the next Flash model, then Gemma with the JSON shape in the prompt: ' + busyAsked);
+  // Every Google model busy: the user's Mistral backup answers; videos never go to a backup.
+  const savedKeys = await Promise.all(['secret:gemini', 'secret:mistral', 'secret:groq'].map((k) => db.getSetting(k, '')));
+  await db.setSetting('secret:gemini', 'k');
+  await db.setSetting('secret:mistral', 'mk');
+  await db.setSetting('secret:groq', '');
+  let mistralReq = null;
+  window.fetch = async (url, opts) => {
+    const u = String(url);
+    if (/\/models\?/.test(u)) return new Response(JSON.stringify(googleList));
+    if (/api\.mistral\.ai/.test(u)) {
+      mistralReq = { auth: opts.headers.Authorization, body: JSON.parse(opts.body) };
+      return new Response(JSON.stringify({ choices: [{ message: { content: '{"translation":"m"}' } }] }));
+    }
+    return busy();
+  };
+  _resetModels();
+  const mb = await geminiJson({ system: 'sys', user: 'u', schema: { type: 'OBJECT', properties: { translation: { type: 'STRING' } } } });
+  let videoErr = '';
+  try { await geminiJson({ system: 's', user: 'u', video: { url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ' } }); } catch (e) { videoErr = e.message; }
+  ok(mb.model === 'mistral-small-latest' && mb.result.translation === 'm' && mistralReq.auth === 'Bearer mk'
+    && mistralReq.body.response_format.type === 'json_object' && /Reply with JSON only/.test(mistralReq.body.messages[0].content)
+    && /busy/i.test(videoErr), 'when every Google model is busy, the Mistral backup answers; a video gets Google’s busy error: ' + videoErr);
+  await db.setSetting('secret:gemini', '');
+  ok((await hasProvider()) && !(await hasProvider({ video: true })), 'a backup key alone is enough for lookups, not for videos');
+  await Promise.all(['secret:gemini', 'secret:mistral', 'secret:groq'].map((k, i) => db.setSetting(k, savedKeys[i])));
+  window.fetch = realFetchU;
+  delete window.__lingoBusyWait;
+  _resetModels();
   await db.setSetting('secret:test', 'sk-123');
   ok(!(await db.exportAll()).data.kv.some((r) => r.key.startsWith('secret:')), 'backups never contain API keys');
   await db.del('kv', 'secret:test');

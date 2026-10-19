@@ -49,6 +49,14 @@ this file records where things stand, what the owner decided, and what's next.
   is used up the next free Flash/Flash-Lite model answers (own key and shared function). The
   owner asked for this after their key ran out; other providers (Groq, Mistral) and rotating
   several keys were offered and not chosen for now.
+- **Busy Gemini no longer fails at once** (2026-10-19): the owner's key "stopped working" when
+  Google was overloaded worldwide (HTTP 503 "high demand", not the quota). Now a busy model gets
+  one quick retry, then the next Flash model, then Gemma (same key, own free limit, weaker;
+  no JSON mode, so the shape goes in the prompt) — own key and shared function. Optional free
+  **Mistral** and **Groq** keys in Settings answer when all of Google fails (not for videos).
+  Research rejected: GitHub Models (retired), Cerebras and Hugging Face (no free tier any more),
+  a cross-user lookup cache. Still open from the research: pre-translating a page's words in
+  one request when it opens (Read Frog-style), offered to the owner and not chosen yet.
 - **Phone**: Capacitor app in `mobile/`, built by GitHub Actions (APK + unsigned IPA,
   docs/MOBILE.md); YouTube captions fetched by the native app (js/youtube.js); file picker
   that iPhones don't grey out; iPhone Shortcut route (docs/IPHONE_SHORTCUT.md). The owner
@@ -62,6 +70,9 @@ this file records where things stand, what the owner decided, and what's next.
 - If the shared `ai` function was deployed before 2026-10-18, redeploy it (new `index.ts`) so
   Gemini can transcribe videos through it. Then try a real French video on the iPhone and check
   the timestamps line up with the speech.
+- Redeploy the shared `ai` function (2026-10-19 `index.ts`) so it also survives busy Gemini.
+- Optional: free Mistral (console.mistral.ai) and/or Groq (console.groq.com) keys in Settings.
+  Their French translation quality, and Gemma's, has **not** been compared with Gemini yet.
 - Optional: the `transcript` Edge Function (cloud helper) so pasting a link works on iPhone.
 - Optional, Android only: signing key secrets so APK updates keep data (docs/MOBILE.md).
 

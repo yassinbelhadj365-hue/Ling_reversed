@@ -54,7 +54,7 @@ function readLines(result, from, to) {
 // -> {ok: true, title, vtt, track, tracks: [], via: 'gemini'} | {ok: false, error, msg?}
 // error: 'no-provider' | 'empty' | 'failed'. onProgress({from, to}) before each part.
 export async function videoTranscript(videoId, language, { onProgress } = {}) {
-  if (!(await hasProvider())) return { ok: false, error: 'no-provider' };
+  if (!(await hasProvider({ video: true }))) return { ok: false, error: 'no-provider' };
   const url = `https://www.youtube.com/watch?v=${videoId}`;
   const all = [];
   let title = '';

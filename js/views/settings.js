@@ -1,6 +1,6 @@
 import * as db from '../db.js';
 import { state, LANGS, lang, langName, saveSettings, loadSettings, loadVocab, toast, download, esc } from '../state.js';
-import { getKey, setKey, listModels } from '../ai.js';
+import { getKey, setKey, listModels, BACKUPS, getBackupKey, setBackupKey } from '../ai.js';
 import { explain } from '../explain.js';
 import { MODELS as ASR_MODELS } from '../asr.js';
 
@@ -82,7 +82,12 @@ export async function renderSettings(view) {
         <span class="small muted">Stored only on this device, never synced or included in backups, and sent only to Google.</span></div>
       <div class="field"><label for="gm-model">Model</label>
         <select id="gm-model"><option value="">Automatic (newest free Flash model)</option></select>
-        <span class="small muted">The list needs your own key. “Lite” models are faster and have a higher free limit. Each model has its own free limit: when this one’s is used up, the other free Flash models answer by themselves.</span></div>
+        <span class="small muted">The list needs your own key. “Lite” models are faster and have a higher free limit. Each model has its own free limit: when this one’s is used up or Google is busy, the other free Flash models answer by themselves, and Gemma (weaker, but rarely busy) last.</span></div>
+      <p class="small muted"><b>Backups (optional):</b> when Gemini is busy or used up, another free AI answers with your own key.
+        Both are free without a card; keys stay on this device. They can’t watch videos.</p>
+      ${BACKUPS.map((p) => `<div class="field"><label for="bk-${p.id}">${esc(p.name)} key (optional)</label>
+        <input id="bk-${p.id}" data-backup="${p.id}" type="password" autocomplete="off">
+        <span class="small muted">Free at <a href="${p.keyUrl}" target="_blank" rel="noopener">${esc(p.keyUrl.replace(/^https:\/\//, ''))}</a>.</span></div>`).join('')}
       <label class="row"><input type="checkbox" data-bool="aiAuto" ${s.aiAuto ? 'checked' : ''}>
         Ask automatically when I tap (otherwise there’s an Explain button, which saves the daily limit)</label>
       <div class="row"><button class="btn small" id="gm-test">Test</button><span id="gm-status" class="small muted"></span></div>
@@ -154,6 +159,10 @@ export async function renderSettings(view) {
   fillModels();
   $('#gm-key').addEventListener('change', (e) => setKey(e.target.value).then(() => { toast('Key saved'); fillModels(); }));
   $('#gm-model').addEventListener('change', (e) => saveSettings({ geminiModel: e.target.value }).then(() => toast('Saved')));
+  view.querySelectorAll('[data-backup]').forEach((el) => {
+    getBackupKey(el.dataset.backup).then((k) => { el.value = k; });
+    el.addEventListener('change', () => setBackupKey(el.dataset.backup, el.value).then(() => toast('Key saved')));
+  });
   $('#gm-test').addEventListener('click', async () => {
     $('#gm-status').textContent = 'Asking…';
     try {

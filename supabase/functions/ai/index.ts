@@ -7,7 +7,11 @@
 //   POST /functions/v1/ai  {system, user, schema?, model?, fast?, temperature?, video?: {url, start?, end?}}
 //   -> {ok: true, text, model, video?: true} | {ok: false, status?, error}
 
-const DEFAULT_MODEL = Deno.env.get('GEMINI_MODEL') || 'gemini-2.5-flash';
+const DEFAULT_MODEL = Deno.env.get('GEMINI_MODEL') || 'gemini-3.6-flash';
+// Gemma has its own free limit and answers last when every Flash model is busy (not for videos).
+const GEMMA_MODELS = ['gemma-4-26b-a4b-it', 'gemma-4-31b-it', 'gemma-3-27b-it'];
+// Google's servers are overloaded ("high demand"): try the next model.
+const isBusy = (s: number) => [500, 502, 503, 504].includes(s);
 const MAX_CHARS = 60000; // about the 30k-character transcript excerpt plus the prompt
 const API = 'https://generativelanguage.googleapis.com/v1beta';
 
@@ -15,26 +19,43 @@ const API = 'https://generativelanguage.googleapis.com/v1beta';
 // Kept while this function instance stays warm (same rule as js/ai.js).
 const spent = new Map<string, number>(); // model -> when to try it again
 let flashModels: string[] | null = null;
+let gemma: string | null = null;
 const version = (id: string) => {
   const m = /^gemini-(\d+)(?:\.(\d+))?-flash(-lite)?$/.exec(id);
   return m ? Number(m[1]) * 100 + Number(m[2] || 0) - (m[3] ? 0.5 : 0) : null;
 };
-async function modelsToTry(key: string, first: string) {
+async function modelsToTry(key: string, first: string, video: boolean) {
   if (!flashModels) {
     try {
       const res = await fetch(`${API}/models?pageSize=200`, { headers: { 'x-goog-api-key': key } });
       if (!res.ok) throw new Error(String(res.status));
       const { models = [] } = await res.json();
-      flashModels = (models as { name: string; supportedGenerationMethods?: string[] }[])
+      const ids = (models as { name: string; supportedGenerationMethods?: string[] }[])
         .filter((m) => (m.supportedGenerationMethods || []).includes('generateContent'))
-        .map((m) => m.name.replace(/^models\//, ''))
-        .filter((id) => version(id) !== null)
+        .map((m) => m.name.replace(/^models\//, ''));
+      flashModels = ids.filter((id) => version(id) !== null)
         .sort((a, b) => version(b)! - version(a)!); // newest first, Lite after its full model
+      gemma = GEMMA_MODELS.find((id) => ids.includes(id)) || null;
     } catch { /* just the first */ }
   }
-  const open = [first, ...(flashModels || []).filter((id) => id !== first)].filter((id) => !((spent.get(id) || 0) > Date.now()));
-  return (open.length ? open : [first]).slice(0, 4);
+  const isOpen = (id: string) => !((spent.get(id) || 0) > Date.now());
+  const open = [first, ...(flashModels || []).filter((id) => id !== first)].filter(isOpen);
+  const last = !video && gemma && gemma !== first && isOpen(gemma) ? [gemma] : [];
+  return [...(open.length || last.length ? open : [first]).slice(0, 4), ...last];
 }
+
+// Gemma takes no system instruction, JSON mode or schema (same as js/ai.js requestBody).
+type Schema = { type?: string; properties?: Record<string, Schema>; items?: Schema };
+function shapeOf(s?: Schema): unknown {
+  if (!s) return '';
+  if (s.type === 'OBJECT') return Object.fromEntries(Object.entries(s.properties || {}).map(([k, v]) => [k, shapeOf(v)]));
+  if (s.type === 'ARRAY') return [shapeOf(s.items)];
+  if (s.type === 'INTEGER' || s.type === 'NUMBER') return 0;
+  if (s.type === 'BOOLEAN') return false;
+  return '';
+}
+const jsonShape = (schema?: Schema) => !schema ? '\n\nReply with JSON only.'
+  : `\n\nReply with JSON only, exactly this shape with every field filled in:\n${JSON.stringify(shapeOf(schema))}`;
 function nextDailyReset() {
   const d = new Date();
   d.setUTCHours(8, 0, 0, 0); // midnight Pacific (standard time)
@@ -76,7 +97,7 @@ Deno.serve(async (req) => {
   try { body = await req.json(); } catch { return reply({ ok: false, error: 'Bad request' }); }
   const system = String(body.system || ''), user = String(body.user || '');
   if (!user || system.length + user.length > MAX_CHARS) return reply({ ok: false, error: 'Request too large' });
-  const model = /^gemini-[\w.-]+$/.test(body.model || '') ? body.model! : DEFAULT_MODEL;
+  const model = /^(gemini|gemma)-[\w.-]+$/.test(body.model || '') ? body.model! : DEFAULT_MODEL;
   // A public YouTube video to transcribe (js/video-ai.js), optionally one part of it.
   const v = body.video;
   if (v && !/^https:\/\/www\.youtube\.com\/watch\?v=[\w-]{11}$/.test(v.url || '')) return reply({ ok: false, error: 'Bad video link' });
@@ -92,7 +113,10 @@ Deno.serve(async (req) => {
   const send = (m: string, withThinking: boolean) => fetch(`${API}/models/${m}:generateContent`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
-    body: JSON.stringify({
+    body: JSON.stringify(/^gemma-/.test(m) ? {
+      contents: [{ role: 'user', parts: [{ text: `${system}${jsonShape(body.schema as Schema)}\n\n${user}` }] }],
+      generationConfig: { temperature: Math.min(1.5, Math.max(0, Number(body.temperature) || 0)) },
+    } : {
       systemInstruction: { parts: [{ text: system }] },
       contents: [{ role: 'user', parts: [...videoParts, { text: user }] }],
       generationConfig: {
@@ -105,17 +129,27 @@ Deno.serve(async (req) => {
   });
 
   try {
-    let failed: { status: number; error: string } | null = null;
-    for (const m of await modelsToTry(key, model)) {
+    let failed: { status: number; error: string } | null = null, retried = false;
+    for (const m of await modelsToTry(key, model, !!v)) {
       let res = await send(m, true);
       let data = await res.json().catch(() => ({}));
       if (res.status === 400 && thinkingFor(m) && /think/i.test(data?.error?.message || '')) {
         res = await send(m, false);
         data = await res.json().catch(() => ({}));
       }
-      // This model's free limit is used up: the next one answers (same rule as js/ai.js).
-      if (res.status === 429 || res.status === 404) {
-        spent.set(m, res.status === 404 || /PerDay/i.test(JSON.stringify(data?.error?.details || [])) ? nextDailyReset() : Date.now() + 60_000);
+      // Busy: one quick second try per request, then the next model.
+      if (isBusy(res.status) && !retried) {
+        retried = true;
+        await new Promise((r) => setTimeout(r, 800 + Math.random() * 400));
+        res = await send(m, true);
+        data = await res.json().catch(() => ({}));
+      }
+      // This model's free limit is used up, or it's busy: the next one answers (same rule as js/ai.js).
+      if (res.status === 429 || res.status === 404 || isBusy(res.status)) {
+        const daily = /PerDay/i.test(JSON.stringify(data?.error?.details || []));
+        const delay = parseFloat((data?.error?.details || []).find((d: { retryDelay?: string }) => d.retryDelay)?.retryDelay) || 60;
+        spent.set(m, res.status === 404 || (res.status === 429 && daily) ? nextDailyReset()
+          : Date.now() + (res.status === 429 ? Math.max(10, delay) : 60) * 1000);
         failed ||= { status: res.status, error: data?.error?.message || res.statusText };
         continue;
       }
