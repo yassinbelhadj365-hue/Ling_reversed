@@ -1,14 +1,15 @@
 // Transcripts for any public YouTube video, written by Gemini from the video itself.
 // The fallback when nothing on this device can download YouTube's captions (an iPhone using
 // the website): the Gemini API accepts a YouTube link as video input, so no download is needed.
-// Long videos go in 10-minute parts (each part is one request, which keeps every answer well
-// under the output limit and the shared Edge Function's time limit).
+// Long videos go in 5-minute parts, three at a time (each part is one request, which keeps
+// every answer well under the output limit and the shared Edge Function's time limit).
 import { geminiJson, hasProvider } from './ai.js';
 import { langName } from './state.js';
 import { toVtt } from './asr.js';
 
-const PART_S = 600;
-const MAX_PARTS = 12; // two hours
+const PART_S = 300; // shorter parts answer faster, and several run at once (AT_ONCE)
+const MAX_PARTS = 24; // two hours
+const AT_ONCE = 3;  // parts asked at the same time: well inside the free per-minute limits
 const NEAR_END_S = 90; // speech this close to the end of a part: the video goes on
 
 const SCHEMA = {
@@ -58,28 +59,34 @@ export async function videoTranscript(videoId, language, { onProgress } = {}) {
   const url = `https://www.youtube.com/watch?v=${videoId}`;
   const all = [];
   let title = '';
-  for (let part = 0; part < MAX_PARTS; part++) {
+  const ask = (part) => {
     const from = part * PART_S, to = from + PART_S;
-    onProgress?.({ from, to });
-    let result;
-    try {
-      ({ result } = await geminiJson({
-        ...prompt(langName(language), from, to), schema: SCHEMA, fast: true,
-        video: { url, start: from, end: to },
-      }));
-    } catch (err) {
-      if (err.message === 'no-provider') return { ok: false, error: 'no-provider' };
-      // A later part can fail because the video has ended: keep what we have.
-      if (part > 0 && all.length) break;
-      return { ok: false, error: 'failed', msg: err.message };
+    return geminiJson({ ...prompt(langName(language), from, to), schema: SCHEMA, fast: true, video: { url, start: from, end: to } })
+      .then(({ result }) => ({ result }), (err) => ({ err }));
+  };
+  // Parts are asked AT_ONCE at a time (a part waiting for the previous one made long videos
+  // take minutes), then read in order until the speech stops.
+  let ended = false;
+  for (let first = 0; first < MAX_PARTS && !ended; first += AT_ONCE) {
+    const batch = Array.from({ length: Math.min(AT_ONCE, MAX_PARTS - first) }, (_, i) => first + i);
+    onProgress?.({ from: first * PART_S, to: (batch.at(-1) + 1) * PART_S });
+    const answers = await Promise.all(batch.map(ask));
+    for (const [i, { result, err }] of answers.entries()) {
+      const part = batch[i], from = part * PART_S, to = from + PART_S;
+      if (err) {
+        if (err.message === 'no-provider') return { ok: false, error: 'no-provider' };
+        // A later part can fail because the video has ended: keep what we have.
+        if (part > 0 && all.length) { ended = true; break; }
+        return { ok: false, error: 'failed', msg: err.message };
+      }
+      if (part === 0) title = String(result.title || '').trim();
+      // Speech across the join can come back in both parts.
+      const prev = all.at(-1);
+      const lines = readLines(result, from, to)
+        .filter((l) => l.start > (prev?.start ?? -1) && l.start < to + 5 && l.text !== prev?.text);
+      all.push(...lines);
+      if (!lines.length || lines.at(-1).start < to - NEAR_END_S) { ended = true; break; }
     }
-    if (part === 0) title = String(result.title || '').trim();
-    // Speech across the join can come back in both parts.
-    const prev = all.at(-1);
-    const lines = readLines(result, from, to)
-      .filter((l) => l.start > (prev?.start ?? -1) && l.start < to + 5 && l.text !== prev?.text);
-    all.push(...lines);
-    if (!lines.length || lines.at(-1).start < to - NEAR_END_S) break;
   }
   if (!all.length) return { ok: false, error: 'empty' };
   const cues = all.map((l, i) => ({

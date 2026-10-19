@@ -148,11 +148,13 @@ export function parseJsonReply(text) {
   return JSON.parse(clean.slice(start, end + 1));
 }
 
-// Quick lookups get only a little "thinking" (which can take seconds): enough to pick the right
-// meaning, not a long deliberation. Gemini 2.5 takes a thinking budget, later models a level.
+// Quick lookups and transcripts skip "thinking" (it took seconds on every tap); "More" keeps
+// it. Gemini 2.5 takes a thinking budget, later models a level. A model that refuses "minimal"
+// gets "low" from then on.
+const noMinimal = new Set();
 export function thinkingLight(model) {
-  if (/^gemini-2\.5-/.test(model)) return /pro/.test(model) ? null : { thinkingBudget: 512 };
-  if (/^gemini-[3-9]/.test(model)) return { thinkingLevel: 'low' };
+  if (/^gemini-2\.5-/.test(model)) return /pro/.test(model) ? null : { thinkingBudget: 0 };
+  if (/^gemini-[3-9]/.test(model)) return { thinkingLevel: noMinimal.has(model) ? 'low' : 'minimal' };
   return null;
 }
 
@@ -209,9 +211,11 @@ async function ask(key, model, req) {
   try {
     res = await send(requestBody(req, model));
     data = await res.json().catch(() => ({}));
-    // A model that doesn't accept the thinking setting: ask again without it.
+    // A model that doesn't accept the thinking setting: "low" instead of "minimal", else without it.
     if (res.status === 400 && req.fast && /think/i.test(data.error?.message || '')) {
-      res = await send(requestBody({ ...req, fast: false }, model));
+      const level = thinkingLight(model)?.thinkingLevel === 'minimal';
+      if (level) noMinimal.add(model);
+      res = await send(requestBody(level ? req : { ...req, fast: false }, model));
       data = await res.json().catch(() => ({}));
     }
   } catch {
@@ -335,7 +339,7 @@ export async function testProvider(id, key) {
 
 // The shared `ai` function on the sync server: what state is it in?
 // -> 'none' (no sync server) | 'missing' (not deployed) | 'old' (needs redeploying) | 'nokey' | 'ok'
-export const AI_FUNCTION_VERSION = '2026-10-19'; // bump with supabase/functions/ai/index.ts `VERSION`
+export const AI_FUNCTION_VERSION = '2026-10-19.2'; // bump with supabase/functions/ai/index.ts `VERSION`
 export async function sharedStatus() {
   if (!cloudConfig()) return 'none';
   const r = await callFunction('ai', { ping: '1' });
@@ -355,22 +359,56 @@ export async function hasProvider({ video = false } = {}) {
   return !!(window.__lingoGemini || (await getKey()) || canShare() || (!video && (await backupsWithKeys()).length));
 }
 
+// A tap waits this long for Gemini before the first backup is asked as well.
+const HEDGE_MS = 2500;
+
 // One JSON answer: Gemini, else (busy, used up, any failure) the backups in order. -> {result, model}
+// For a quick lookup (req.fast) a slow Gemini doesn't keep the learner waiting: after HEDGE_MS
+// the backups are asked too, and the first answer wins.
 // Throws Error('no-provider') when nothing is set up; otherwise Gemini's error comes first.
 export async function geminiJson(req) {
   if (window.__lingoGemini) return window.__lingoGemini(req); // smoke-test hook
   const key = await getKey();
-  let error = null;
-  if (key || canShare()) {
-    try { return await (key ? direct(key, req) : shared(req)); } catch (err) { error = err; }
-  }
-  if (!req.video) {
-    for (const { p, key: k } of await backupsWithKeys()) {
+  const google = key || canShare() ? () => (key ? direct(key, req) : shared(req)) : null;
+  const backups = req.video ? [] : await backupsWithKeys();
+  const viaBackups = async () => {
+    let error = null;
+    for (const { p, key: k } of backups) {
       if (spent.get(p.id) > Date.now()) continue;
       try { return await backup(p, k, req); } catch (err) { error ||= err; }
     }
+    throw error || new Error('no-provider');
+  };
+  if (!google) return viaBackups();
+  if (!req.fast || !backups.length) {
+    try { return await google(); } catch (err) {
+      if (!backups.length) throw err;
+      try { return await viaBackups(); } catch { throw err; }
+    }
   }
-  throw error || new Error('no-provider');
+  return new Promise((resolve, reject) => {
+    let googleErr = null, backupErr = null, asked = false, done = false;
+    const win = (r) => { if (!done) { done = true; clearTimeout(timer); resolve(r); } };
+    const askBackups = () => {
+      if (asked) return;
+      asked = true;
+      viaBackups().then(win, (e) => { backupErr = e; if (googleErr) reject(googleErr); });
+    };
+    const timer = setTimeout(askBackups, window.__lingoHedgeMs ?? HEDGE_MS);
+    google().then(win, (e) => {
+      googleErr = e;
+      clearTimeout(timer);
+      if (!asked) askBackups(); else if (backupErr) reject(e);
+    });
+  });
+}
+
+// The first tap of a session shouldn't also wait for the model list or a sleeping server:
+// fetch the list (own key) or wake the shared function (signed in) when the app starts.
+export async function warmUp() {
+  const key = await getKey();
+  if (key) modelsOf(key).catch(() => {});
+  else if (canShare()) callFunction('ai', { ping: '1' }).catch(() => {});
 }
 
 export const sourceLabel = (model) => `${model || 'Gemini'} (free)`;

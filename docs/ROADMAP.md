@@ -57,6 +57,10 @@ this file records where things stand, what the owner decided, and what's next.
   Research rejected: GitHub Models (retired), Cerebras and Hugging Face (no free tier any more),
   a cross-user lookup cache. Still open from the research: pre-translating a page's words in
   one request when it opens (Read Frog-style), offered to the owner and not chosen yet.
+- **Faster AI** (2026-10-19, the owner said lookups and video transcripts were far too slow):
+  taps no longer let Gemini "think" ("More" still does); a tap that waits 2.5 s for Gemini also
+  asks Groq/Cohere and shows the first answer; the model list / shared function is warmed at
+  start; videos go in 5-minute parts, three at once. Not timed with a real key yet.
 - **AI setup in one place** (Settings → AI, 2026-10-19): "Get a free key ↗" per AI, one
   📋 Paste a key button that recognizes Gemini/Mistral/Groq keys and checks them at once, a ✓/✗
   status per AI, and the shared server's state with copy-the-code / open-Supabase steps when it
@@ -76,7 +80,7 @@ this file records where things stand, what the owner decided, and what's next.
 - If the shared `ai` function was deployed before 2026-10-18, redeploy it (new `index.ts`) so
   Gemini can transcribe videos through it. Then try a real French video on the iPhone and check
   the timestamps line up with the speech.
-- Redeploy the shared `ai` function (2026-10-19 `index.ts`) so it also survives busy Gemini.
+- Redeploy the shared `ai` function (latest `index.ts`; Settings → AI says when it is out of date).
 - Optional: free Groq (console.groq.com) and Cohere (dashboard.cohere.com) keys in Settings → AI.
   Mistral no longer gives new accounts free API keys (owner hit this, 2026-10-19).
   Their French translation quality (and Gemma's, Mistral's) has **not** been compared with Gemini yet.

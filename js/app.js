@@ -11,6 +11,7 @@ import { renderAccount } from './views/account.js';
 import * as db from './db.js';
 import { activeAccount, startSync, onStatus } from './cloud.js';
 import { startRelay } from './relay.js';
+import { warmUp } from './ai.js';
 
 const VIEWS = {
   account: renderAccount,
@@ -127,6 +128,7 @@ async function init() {
   if ('serviceWorker' in navigator && location.protocol !== 'file:' && !window.Capacitor?.isNativePlatform?.()) {
     navigator.serviceWorker.register('sw.js').catch(() => { /* offline mode unavailable */ });
   }
+  warmUp().catch(() => {}); // the first word tap shouldn't wait for setup
   document.body.dataset.ready = '1';
 }
 

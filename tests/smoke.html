@@ -205,6 +205,29 @@ try {
   ok(mb.model === 'command-a-03-2025' && mb.result.translation === 'm' && backupReq.auth === 'Bearer ck' && groqAsked && !mistralAsked
     && backupReq.body.response_format.type === 'json_object' && /Reply with JSON only/.test(backupReq.body.messages[0].content)
     && /busy/i.test(videoErr), 'when every Google model and Groq are busy, Cohere answers (Mistral isn’t needed); a video gets Google’s busy error: ' + videoErr);
+  // A tap (fast) with a slow Gemini: Groq is asked as well after a moment, and its answer is shown.
+  _resetModels();
+  window.__lingoHedgeMs = 30;
+  let slowGoogle = 0;
+  window.fetch = async (url) => {
+    const u = String(url);
+    if (/\/models\?/.test(u)) return new Response(JSON.stringify(googleList));
+    if (/api\.groq\.com/.test(u)) return new Response(JSON.stringify({ choices: [{ message: { content: '{"translation":"fast"}' } }] }));
+    if (/generateContent/.test(u)) {
+      slowGoogle++;
+      await sleep(400);
+      return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: '{"translation":"slow"}' }] } }] }));
+    }
+    return busy();
+  };
+  const t0 = performance.now();
+  const hedged = await geminiJson({ system: 'sys', user: 'u', fast: true });
+  const hedgeMs = performance.now() - t0;
+  const unhedged = await geminiJson({ system: 'sys', user: 'u' }); // "More" waits for Gemini
+  delete window.__lingoHedgeMs;
+  ok(hedged.result.translation === 'fast' && hedged.model === 'gpt-oss-120b' && hedgeMs < 350 && slowGoogle >= 1
+    && unhedged.result.translation === 'slow' && requestBody({ system: 's', user: 'u', fast: true }, 'gemini-3.6-flash').generationConfig.thinkingConfig.thinkingLevel === 'minimal',
+    `a tap doesn’t wait for a slow Gemini: Groq answers in ${Math.round(hedgeMs)} ms; taps skip thinking`);
   await db.setSetting('secret:gemini', '');
   ok((await hasProvider()) && !(await hasProvider({ video: true })), 'a backup key alone is enough for lookups, not for videos');
   ok(keyKind(' AIzaSyD-abcdefghijklmnopqrstuvwxyz0123 ') === 'gemini' && keyKind('gsk_' + 'x'.repeat(40)) === 'groq'
@@ -821,8 +844,9 @@ try {
   const parts = [];
   videoAnswer = (req) => {
     parts.push(req.video);
+    if (req.video.start >= 600) return { lines: [] }; // asked at the same time, after the end
     return req.video.start === 0
-      ? { title: 'Un vídeo largo', lines: [{ start: '00:05', text: 'Hola a todos.' }, { start: '09:00', text: 'Seguimos  después.' }] }
+      ? { title: 'Un vídeo largo', lines: [{ start: '00:05', text: 'Hola a todos.' }, { start: '04:30', text: 'Seguimos  después.' }] }
       : { lines: [{ start: '00:00', text: 'Seguimos después.' }, { start: '00:10', text: 'Y esto es el final.' }] }; // counted from the part
   };
   W().location.hash = '#/import';
@@ -831,10 +855,10 @@ try {
   D().getElementById('text').dispatchEvent(new Event('input'));
   await until(() => /Gemini wrote/.test(D().getElementById('yt-status').textContent) || /couldn’t|can’t/.test(D().getElementById('yt-status').textContent));
   const gVtt = D().getElementById('text').value;
-  ok(/Gemini wrote/.test(D().getElementById('yt-status').textContent) && parts.length === 2 && parts[0].url === 'https://www.youtube.com/watch?v=dQw4w9WgXcQ'
-    && parts[1].start === 600 && parts[1].end === 1200 && D().getElementById('title').value === 'Un vídeo largo',
-    'with no way to download captions, Gemini transcribes the video in 10-minute parts: ' + D().getElementById('yt-status').textContent + JSON.stringify(parts));
-  ok(/^00:00:05\.000 --> /m.test(gVtt) && /^00:09:00\.000 --> /m.test(gVtt) && /^00:10:10\.000 --> [^\n]*\nY esto es el final\./m.test(gVtt)
+  ok(/Gemini wrote/.test(D().getElementById('yt-status').textContent) && parts.length === 3 && parts[0].url === 'https://www.youtube.com/watch?v=dQw4w9WgXcQ'
+    && parts.map((p) => `${p.start}-${p.end}`).join() === '0-300,300-600,600-900' && D().getElementById('title').value === 'Un vídeo largo',
+    'with no way to download captions, Gemini transcribes the video in 5-minute parts, three at once: ' + D().getElementById('yt-status').textContent + JSON.stringify(parts));
+  ok(/^00:00:05\.000 --> /m.test(gVtt) && /^00:04:30\.000 --> /m.test(gVtt) && /^00:05:10\.000 --> [^\n]*\nY esto es el final\./m.test(gVtt)
     && (gVtt.match(/Seguimos/g) || []).length === 1, 'its lines are timed from the start of the video, without the repeat at the join: ' + gVtt);
   D().getElementById('go').click();
   await until(() => V().classList.contains('listen') && /final/.test(D().getElementById('reader').textContent));

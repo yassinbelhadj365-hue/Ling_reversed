@@ -7,7 +7,7 @@
 //   POST /functions/v1/ai  {system, user, schema?, model?, fast?, temperature?, video?: {url, start?, end?}}
 //   -> {ok: true, text, model, video?: true} | {ok: false, status?, error}
 
-const VERSION = '2026-10-19'; // js/ai.js AI_FUNCTION_VERSION: Settings asks to redeploy an older one
+const VERSION = '2026-10-19.2'; // js/ai.js AI_FUNCTION_VERSION: Settings asks to redeploy an older one
 const DEFAULT_MODEL = Deno.env.get('GEMINI_MODEL') || 'gemini-3.6-flash';
 // Gemma has its own free limit and answers last when every Flash model is busy (not for videos).
 const GEMMA_MODELS = ['gemma-4-26b-a4b-it', 'gemma-4-31b-it', 'gemma-3-27b-it'];
@@ -21,6 +21,7 @@ const API = 'https://generativelanguage.googleapis.com/v1beta';
 const spent = new Map<string, number>(); // model -> when to try it again
 let flashModels: string[] | null = null;
 let gemma: string | null = null;
+const noMinimal = new Set<string>(); // models that refused thinkingLevel "minimal"
 const version = (id: string) => {
   const m = /^gemini-(\d+)(?:\.(\d+))?-flash(-lite)?$/.exec(id);
   return m ? Number(m[1]) * 100 + Number(m[2] || 0) - (m[3] ? 0.5 : 0) : null;
@@ -108,10 +109,10 @@ Deno.serve(async (req) => {
     ...(v.end ? { videoMetadata: { startOffset: `${Math.max(0, Number(v.start) || 0)}s`, endOffset: `${Number(v.end) || 0}s` } } : {}),
   }];
 
-  // Quick lookups get only a little "thinking" (same rule as js/ai.js thinkingLight).
+  // Quick lookups and transcripts skip "thinking" (same rule as js/ai.js thinkingLight).
   const thinkingFor = (m: string) => !body.fast ? null
-    : /^gemini-2\.5-/.test(m) ? (/pro/.test(m) ? null : { thinkingBudget: 512 })
-    : /^gemini-[3-9]/.test(m) ? { thinkingLevel: 'low' } : null;
+    : /^gemini-2\.5-/.test(m) ? (/pro/.test(m) ? null : { thinkingBudget: 0 })
+    : /^gemini-[3-9]/.test(m) ? { thinkingLevel: noMinimal.has(m) ? 'low' : 'minimal' } : null;
   const send = (m: string, withThinking: boolean) => fetch(`${API}/models/${m}:generateContent`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
@@ -136,7 +137,10 @@ Deno.serve(async (req) => {
       let res = await send(m, true);
       let data = await res.json().catch(() => ({}));
       if (res.status === 400 && thinkingFor(m) && /think/i.test(data?.error?.message || '')) {
-        res = await send(m, false);
+        // "low" instead of "minimal", else without the setting.
+        const minimal = thinkingFor(m)?.thinkingLevel === 'minimal';
+        if (minimal) noMinimal.add(m);
+        res = await send(m, minimal);
         data = await res.json().catch(() => ({}));
       }
       // Busy: one quick second try per request, then the next model.
