@@ -420,9 +420,19 @@ try {
   });
   let aiAnswer = null; // set by a test to answer differently
   let videoAnswer = null; // set by a test: transcripts of a YouTube video (js/video-ai.js)
+  W().__lingoNoPrefetch = true; // background lookups are tested on their own (story lesson)
   W().__lingoGemini = async (req) => {
     aiCalls.push(req);
     if (req.video) return { model: 'test-model', result: videoAnswer(req) };
+    if (req.background) { // a page's words at once (explain.js buildBatch)
+      const sents = [...req.user.matchAll(/^(\d+)\. (.+)$/gm)].filter((m) => !/^sentence \d+, target/.test(m[2]));
+      const items = [...req.user.matchAll(/^(\d+)\. sentence (\d+), target "(.*?)"/gm)];
+      return { model: 'test-model', result: {
+        sentences: sents.map((m) => ({ id: Number(m[1]), translation: '[EN] ' + m[2] })),
+        items: items.map((m) => ({ id: Number(m[1]), highlight: '', meaning_native: 'pre ' + m[3], meaning_target: '', lemma: m[3],
+          part_of_speech: '', multiword_unit: null, same_meaning_as: 0 })),
+      } };
+    }
     if (req.schema?.properties?.paragraphs) return { model: 'test-model', result: { title: 'Una historia', paragraphs: ['El gato come comida. Es feliz.', 'Después duerme en la casa.'] } };
     if (!req.schema.properties.meaning_native) return { model: 'test-model', result: { translation: EN[req.user] || '[EN] ' + req.user } };
     const term = /Target: "(.*)"/.exec(req.user)?.[1] || /Passage: "(.*)"/s.exec(req.user)?.[1] || '';
@@ -884,6 +894,25 @@ try {
   ok(lingqsNow.length && storyLesson.story.targets.length && storyLesson.story.targets.every((t) => lingqsNow.includes(t))
     && storyLesson.story.targets.every((t) => storyReq.user.includes(t)), 'the story is asked to use the learner’s LingQs: ' + storyLesson.story.targets);
   ok(D().querySelector('#reader .w[data-n="gato"]'), 'the story reads like any lesson (tappable words)');
+
+  // ---- a page's words are looked up in the background, so a tap answers at once ----
+  delete W().__lingoNoPrefetch;
+  const batchCalls = () => aiCalls.filter((c) => c.background);
+  const batchesBefore = batchCalls().length;
+  W().location.hash = '#/library';
+  await until(() => !D().getElementById('reader'));
+  W().location.hash = `#/lesson/${storyLesson.id}`;
+  await until(() => batchCalls().length > batchesBefore);
+  const batchReq = batchCalls().at(-1);
+  await sleep(300);
+  const tapsBefore = aiCalls.length;
+  D().querySelector('#reader .w[data-n="feliz"]').click();
+  await until(() => /pre feliz/.test(D().querySelector('#word-panel')?.textContent || ''), 2000);
+  ok(/target "feliz"/.test(batchReq.user) && /Es feliz\./.test(batchReq.user) && batchReq.fast && batchReq.schema.properties.items
+    && aiCalls.length === tapsBefore && /\[EN\] Es feliz\./.test(D().querySelector('#word-panel').textContent),
+    'the page’s new words are looked up together in the background; a tap then answers from them with no AI call');
+  W().__lingoNoPrefetch = true;
+  D().querySelector('#word-panel .close, #word-panel [data-act="close"]')?.click();
 
   // ---- read aloud: sentence by sentence, the spoken word highlighted (fake speech engine) ----
   const spokenTexts = [];

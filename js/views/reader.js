@@ -8,7 +8,7 @@
 import * as db from '../db.js';
 import {
   state, statusOf, setStatusMany, applyEvents, undoAuto, markSeen, bumpActivity, removeLessonFromPool, updateLessonLine,
-  saveSettings, tts, utterance, esc, toast, plural, startStudyTimer, activityByDay, dayKey,
+  saveSettings, tts, utterance, esc, toast, plural, startStudyTimer, activityByDay, dayKey, getWord,
 } from '../state.js';
 import { lessonLevel } from './library.js';
 import { milestoneBarHtml } from '../progress.js';
@@ -16,6 +16,7 @@ import { tokenize, formatTime, sentenceAt, contextAt } from '../text.js';
 import { translateSentence, ERROR_TEXT } from '../ai.js';
 import { NEW, KNOWN, isLearning } from '../srs.js';
 import { openPanel, closePanel, panelTerm } from '../panel.js';
+import { prefetch } from '../explain.js';
 import { createPlayer } from '../player.js';
 import { buildTimeline, activeIndex, charAt } from '../sync.js';
 import { fetchYouTubeAudio, decodeAudio, transcribe, progressText, AUDIO_ERRORS } from '../asr.js';
@@ -170,6 +171,9 @@ export async function renderReader(view, id) {
   const offset = () => lesson.syncOffset || 0;
   let dead = false;
   let activeIdx = -1;      // lesson segment index of the active line
+  let stopPrefetch = null;  // stops the background lookups of the previous page (prefetchLines)
+  const prefetched = new Set(); // listen mode: lines already looked up
+  const PREFETCH_AHEAD = 8;     // listen mode: lines looked up ahead of the spoken one
   let activePos = -1;      // its position in the timeline
   let lastT = null;
   let segPlayed = 0;       // seconds of normal playback within the active line
@@ -209,6 +213,7 @@ export async function renderReader(view, id) {
       activeIdx = idx;
       activePos = pos;
       segPlayed = 0;
+      if (listen && idx >= 0) prefetchAhead(idx);
       setActive(idx);
       reader.querySelectorAll('.w.spoken').forEach((s) => s.classList.remove('spoken'));
       spokenUpTo = -1;
@@ -427,6 +432,8 @@ export async function renderReader(view, id) {
     }).join('') || '<p class="muted">This lesson is empty.</p>';
     markPhrases();
     if (sentOn) { showUnit(goLast ? Infinity : unitPage === page ? unit : 0); goLast = false; }
+    if (listen) prefetchAhead(pages[page][0] ?? 0);
+    else { stopPrefetch?.(); stopPrefetch = prefetchLines(pages[page]); }
     if (!listen) {
       $('#pageinfo').textContent = `Page ${page + 1} of ${pages.length}`;
       $('#prev').disabled = page === 0;
@@ -656,7 +663,20 @@ export async function renderReader(view, id) {
   function open(term, p, spans) {
     reader.querySelectorAll('.w.active').forEach((n) => n.classList.remove('active'));
     spans.forEach((s) => s.classList.add('active'));
-    // The context of the occurrence you tapped (its sentence, or a few caption lines around it), with the word's position in it.
+    const i = Number(p.dataset.i);
+    const { sentence, mark } = contextOf(p, spans);
+    const around = { prev: lesson.segments[i - 1]?.text.slice(-200) || '', next: lesson.segments[i + 1]?.text.slice(0, 200) || '' };
+    const flag = spans.length === 1 && spans[0].dataset.flag !== undefined ? flagActions(i, Number(spans[0].dataset.flag)) : null;
+    openPanel(term, {
+      context: sentence, mark, around, flag, transcript: transcriptText(),
+      onFlag: flag ? null : () => flagRanges(rangesOf(spans)),
+      onChange: refresh, onClose: onPanelClose,
+    });
+    if (listen) requestAnimationFrame(() => followTo(activeIdx, true));
+  }
+
+  // The context of an occurrence (its sentence, or a few caption lines around it), with the word's position in it.
+  function contextOf(p, spans) {
     const i = Number(p.dataset.i);
     const seg = lesson.segments[i];
     const from = Number(spans[0].dataset.o);
@@ -669,15 +689,36 @@ export async function renderReader(view, id) {
     // A phrase that runs past the short context: use its whole sentence instead.
     if (to - start > sentence.length) ({ sentence, start } = sentenceAt(seg.text, from));
     const mark = from - start >= 0 && to - start <= sentence.length ? [from - start, to - start] : null;
-    const around = { prev: lesson.segments[i - 1]?.text.slice(-200) || '', next: lesson.segments[i + 1]?.text.slice(0, 200) || '' };
-    const flag = spans.length === 1 && spans[0].dataset.flag !== undefined ? flagActions(i, Number(spans[0].dataset.flag)) : null;
-    openPanel(term, {
-      context: sentence, mark, around, flag, transcript: transcriptText(),
-      onFlag: flag ? null : () => flagRanges(rangesOf(spans)),
-      onChange: refresh, onClose: onPanelClose,
-    });
-    if (listen) requestAnimationFrame(() => followTo(activeIdx, true));
+    return { sentence, mark };
   }
+
+  // The new and LingQ words of these lines are looked up in the background, with the same
+  // context a tap would use, so tapping them shows the answer at once (explain.js prefetch).
+  function prefetchLines(indices) {
+    if (!state.settings.aiAuto || !state.settings.aiPrefetch || window.__lingoNoPrefetch) return null;
+    const items = [], seen = new Set();
+    for (const i of indices) {
+      const p = reader.querySelector(`p.cue[data-i="${i}"]`);
+      for (const span of p?.querySelectorAll('.w') || []) {
+        const term = span.dataset.n, st = statusOf(term);
+        if (st !== NEW && !isLearning(st)) continue;
+        const { sentence } = contextOf(p, [span]);
+        if (seen.has(`${term}|${sentence}`)) continue;
+        seen.add(`${term}|${sentence}`);
+        items.push({ term, sentence, senses: (getWord(term)?.senses || []).map((s) => s.meaning) });
+      }
+    }
+    if (!items.length) return null;
+    return prefetch(items, { context: indices.map((i) => lesson.segments[i]?.text || '').join('\n') });
+  }
+  function prefetchAhead(idx) {
+    const next = [];
+    for (let i = Math.max(0, idx); i < Math.min(lesson.segments.length, idx + PREFETCH_AHEAD); i++) {
+      if (!prefetched.has(i)) { prefetched.add(i); next.push(i); }
+    }
+    if (next.length) prefetchLines(next);
+  }
+  cleanups.push(() => stopPrefetch?.());
 
   // Automatic changes made while this lesson is open: term -> {from, to}.
   const session = new Map();

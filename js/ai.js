@@ -380,7 +380,7 @@ export async function geminiJson(req) {
     throw error || new Error('no-provider');
   };
   if (!google) return viaBackups();
-  if (!req.fast || !backups.length) {
+  if (!req.fast || req.background || !backups.length) {
     try { return await google(); } catch (err) {
       if (!backups.length) throw err;
       try { return await viaBackups(); } catch { throw err; }

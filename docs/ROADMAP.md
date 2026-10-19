@@ -55,12 +55,15 @@ this file records where things stand, what the owner decided, and what's next.
   no JSON mode, so the shape goes in the prompt) — own key and shared function. Optional free
   **Mistral** and **Groq** keys in Settings answer when all of Google fails (not for videos).
   Research rejected: GitHub Models (retired), Cerebras and Hugging Face (no free tier any more),
-  a cross-user lookup cache. Still open from the research: pre-translating a page's words in
-  one request when it opens (Read Frog-style), offered to the owner and not chosen yet.
+  a cross-user lookup cache.
 - **Faster AI** (2026-10-19, the owner said lookups and video transcripts were far too slow):
   taps no longer let Gemini "think" ("More" still does); a tap that waits 2.5 s for Gemini also
   asks Groq/Cohere and shows the first answer; the model list / shared function is warmed at
   start; videos go in 5-minute parts, three at once. Not timed with a real key yet.
+- **Instant taps** (2026-10-19, the owner wants taps under half a second, which no AI can do
+  live): each page's new and LingQ words (listen mode: the next 8 lines) are looked up in the
+  background in batches, so a tap reads a saved answer. Uses more of the free limit; a Settings
+  switch turns it off. Words tapped before their batch is back still take a second or two.
 - **AI setup in one place** (Settings → AI, 2026-10-19): "Get a free key ↗" per AI, one
   📋 Paste a key button that recognizes Gemini/Mistral/Groq keys and checks them at once, a ✓/✗
   status per AI, and the shared server's state with copy-the-code / open-Supabase steps when it
