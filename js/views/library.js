@@ -49,6 +49,15 @@ const thumbHtml = (l) => (l.youtubeId
   ? `<img class="thumb" loading="lazy" alt="" src="https://i.ytimg.com/vi/${encodeURIComponent(l.youtubeId)}/mqdefault.jpg" onerror="this.remove()">`
   : '');
 
+// 📋 Paste link: whatever is copied goes straight to Import (stored like a link shared into
+// the app), where a YouTube link opens its lesson by itself. iOS shows its own Paste bubble.
+async function pasteToImport() {
+  let clip = '';
+  try { clip = (await navigator.clipboard.readText()).trim(); } catch { /* refused or unsupported */ }
+  if (clip) try { sessionStorage.setItem('lingo-share', JSON.stringify({ text: clip })); } catch { /* storage blocked */ }
+  location.hash = '#/import';
+}
+
 // The top of the Library: one obvious next step. "Continue" is the lesson you opened last
 // and haven't finished; "Up next" is an unfinished lesson at a good level for you (the
 // one you know most of among 85–95%, else the easiest). '' when there's nothing to suggest.
@@ -129,11 +138,13 @@ export async function renderLibrary(view) {
         </ol>
         <div class="row">
           ${sample ? `<button class="btn primary" id="sample">Try a 2-minute sample lesson</button>` : ''}
-          <a class="btn ${sample ? '' : 'primary'}" href="#/import">Import a YouTube video or text</a>
+          <button class="btn ${sample ? '' : 'primary'}" data-paste-link>📋 Paste a YouTube link</button>
+          <a class="btn" href="#/import">Import text or a file</a>
         </div>
         ${ai ? '' : `<p class="small muted">Tapping a word asks a free AI. To turn it on, <a href="#/account">log in to your account</a>
           or <a href="#/settings/ai">set up a free AI</a>.</p>`}
       </div>`;
+    view.querySelectorAll('[data-paste-link]').forEach((b) => b.addEventListener('click', pasteToImport));
     wireJobs(view, rerender);
     view.querySelector('#w-lang').addEventListener('change', (e) => {
       const top = document.getElementById('lang-select');
@@ -178,7 +189,7 @@ export async function renderLibrary(view) {
 
   const recap = await lastWeekCard();
   view.innerHTML = `
-    <div class="row spread"><h1>${esc(langName(lang()))} library</h1><div class="row"><a class="btn small" href="#/import/story" title="The AI writes a story at your level with your LingQs">✨ Story</a><a class="btn primary small" href="#/import">+ Import</a></div></div>
+    <div class="row spread"><h1>${esc(langName(lang()))} library</h1><div class="row"><a class="btn small" href="#/import/story" title="The AI writes a story at your level with your LingQs">✨ Story</a><button class="btn small" data-paste-link title="Paste a copied YouTube link: its lesson opens by itself">📋 Paste link</button><a class="btn primary small" href="#/import">+ Import</a></div></div>
     ${jobs}
     ${continueCard(lessons)}
     ${recap}
@@ -188,6 +199,7 @@ export async function renderLibrary(view) {
     e.target.closest('.recap').remove();
     await closeLastWeekCard();
   });
+  view.querySelectorAll('[data-paste-link]').forEach((b) => b.addEventListener('click', pasteToImport));
   wireJobs(view, rerender);
 
   view.querySelector('#q').addEventListener('input', (e) => {

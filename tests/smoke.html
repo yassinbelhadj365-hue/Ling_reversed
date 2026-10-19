@@ -458,10 +458,10 @@ try {
   await until(() => D().getElementById('paste'));
   Object.defineProperty(W().navigator, 'clipboard', { value: { readText: async () => SC_TEXT }, configurable: true });
   D().getElementById('paste').click();
-  await until(() => /^WEBVTT/.test(D().getElementById('text').value));
-  ok(D().getElementById('text').value === SC_VTT_ES.trim() && /v=dQw4w9WgXcQ/.test(D().getElementById('yt').value)
-    && D().getElementById('title').value === 'Un vídeo' && /iPhone Shortcut/.test(D().getElementById('yt-status').textContent),
-    'pasting the Shortcut’s text loads the Spanish captions, link and title: ' + D().getElementById('yt-status').textContent);
+  await until(() => /^#\/lesson\//.test(W().location.hash));
+  const scLesson = await db.get('lessons', W().location.hash.split('/').pop());
+  ok(scLesson?.title === 'Un vídeo' && scLesson.youtubeId === 'dQw4w9WgXcQ' && scLesson.segments.length > 0,
+    'pasting the Shortcut’s text opens the lesson with its Spanish captions, video and title, with no Import button to press');
   delete W().navigator.clipboard;
   W().location.hash = '#/library';
   await sleep(200);
@@ -811,7 +811,8 @@ try {
   W().fetch = async (url, ...rest) => String(url).startsWith('api/transcript')
     ? new Response(JSON.stringify({ ok: true, title: 'Vídeo automático', vtt: AUTO_VTT,
         track: { index: 0, lang: 'es', kind: 'auto', name: 'Spanish (auto-generated)' },
-        tracks: [{ index: 0, lang: 'es', kind: 'auto', name: 'Spanish (auto-generated)' }, { index: 1, lang: 'en', kind: 'manual', name: 'English' }] }),
+        tracks: [{ index: 0, lang: 'es', kind: 'auto', name: 'Spanish (auto-generated)' }, { index: 1, lang: 'en', kind: 'manual', name: 'English' },
+          { index: 2, lang: 'es', kind: 'manual', name: 'Spanish' }] }),
         { headers: { 'content-type': 'application/json' } })
     : realFetch(url, ...rest);
   W().location.hash = '#/import';
@@ -825,11 +826,29 @@ try {
   ok(/^✓ Loaded/.test(D().getElementById('yt-status').textContent) && D().getElementById('title').value === 'Vídeo automático'
     && D().getElementById('yt').value === 'https://youtu.be/dQw4w9WgXcQ' && !D().getElementById('ai-yt').hidden,
     'a YouTube link in the main box fetches the transcript and title: ' + D().getElementById('yt-status').textContent);
-  ok(!D().getElementById('yt-track').hidden && D().getElementById('yt-track').options.length === 2, 'other caption tracks can be chosen');
+  ok(!D().getElementById('yt-track').hidden && D().getElementById('yt-track').options.length === 3 && /^#\/import/.test(W().location.hash),
+    'with two sets of Spanish captions, Import waits so another track can be chosen');
   D().getElementById('go').click();
   await until(() => V().classList.contains('listen') && D().querySelector('#reader .w'));
   const autoLesson = await db.get('lessons', W().location.hash.split('/').pop());
   ok(autoLesson.segments.length === 1 && autoLesson.segments[0].marks?.length === 5, 'auto-captions became one sentence with word timings');
+
+  // ---- 📋 Paste link in the Library: from a copied link straight into its lesson ----
+  W().fetch = async (url, ...rest) => String(url).startsWith('api/transcript')
+    ? new Response(JSON.stringify({ ok: true, title: 'Desde la biblioteca', vtt: AUTO_VTT,
+        track: { index: 0, lang: 'es', kind: 'auto', name: 'Spanish (auto-generated)' },
+        tracks: [{ index: 0, lang: 'es', kind: 'auto', name: 'Spanish (auto-generated)' }, { index: 1, lang: 'en', kind: 'manual', name: 'English' }] }),
+        { headers: { 'content-type': 'application/json' } })
+    : realFetch(url, ...rest);
+  W().location.hash = '#/library';
+  await until(() => D().querySelector('#view [data-paste-link]'));
+  Object.defineProperty(W().navigator, 'clipboard', { value: { readText: async () => 'https://youtu.be/dQw4w9WgXcQ' }, configurable: true });
+  D().querySelector('#view [data-paste-link]').click();
+  await until(() => /^#\/lesson\//.test(W().location.hash) && D().querySelector('#reader .w'));
+  const libLesson = await db.get('lessons', W().location.hash.split('/').pop());
+  ok(libLesson?.title === 'Desde la biblioteca' && libLesson.youtubeId === 'dQw4w9WgXcQ',
+    '📋 Paste link in the Library goes from a copied YouTube link straight into its lesson');
+  delete W().navigator.clipboard;
   W().fetch = realFetch;
 
   // ---- AI transcription from a YouTube link (audio download and Whisper stubbed) ----
@@ -880,16 +899,15 @@ try {
   await until(() => D().getElementById('yt') && !D().getElementById('text').value);
   D().getElementById('text').value = 'https://youtu.be/dQw4w9WgXcQ';
   D().getElementById('text').dispatchEvent(new Event('input'));
-  await until(() => /Gemini wrote/.test(D().getElementById('yt-status').textContent) || /couldn’t|can’t/.test(D().getElementById('yt-status').textContent));
-  const gVtt = D().getElementById('text').value;
-  ok(/Gemini wrote/.test(D().getElementById('yt-status').textContent) && parts.length === 3 && parts[0].url === 'https://www.youtube.com/watch?v=dQw4w9WgXcQ'
-    && parts.map((p) => `${p.start}-${p.end}`).join() === '0-300,300-600,600-900' && D().getElementById('title').value === 'Un vídeo largo',
-    'with no way to download captions, Gemini transcribes the video in 5-minute parts, three at once: ' + D().getElementById('yt-status').textContent + JSON.stringify(parts));
-  ok(/^00:00:05\.000 --> /m.test(gVtt) && /^00:04:30\.000 --> /m.test(gVtt) && /^00:05:10\.000 --> [^\n]*\nY esto es el final\./m.test(gVtt)
-    && (gVtt.match(/Seguimos/g) || []).length === 1, 'its lines are timed from the start of the video, without the repeat at the join: ' + gVtt);
-  D().getElementById('go').click();
-  await until(() => V().classList.contains('listen') && /final/.test(D().getElementById('reader').textContent));
+  await until(() => V().classList.contains('listen') && /final/.test(D().getElementById('reader')?.textContent || ''), 8000);
   const gLesson = await db.get('lessons', W().location.hash.split('/').pop());
+  ok(gLesson?.title === 'Un vídeo largo' && parts.length === 3 && parts[0].url === 'https://www.youtube.com/watch?v=dQw4w9WgXcQ'
+    && parts.map((p) => `${p.start}-${p.end}`).join() === '0-300,300-600,600-900',
+    'with no way to download captions, Gemini transcribes the video in 5-minute parts, three at once, and the lesson opens by itself: ' + JSON.stringify(parts));
+  const gStarts = gLesson.segments.flatMap((s) => [s.start, ...(s.marks || []).map(([, t]) => t)]).filter((t) => t != null);
+  const gText = gLesson.segments.map((s) => s.text).join(' ');
+  ok([5, 270, 310].every((t) => gStarts.includes(t)) && /Y esto es el final\./.test(gText) && (gText.match(/Seguimos/g) || []).length === 1,
+    'its lines are timed from the start of the video, without the repeat at the join: ' + JSON.stringify(gStarts));
   ok(gLesson.asr === true && gLesson.youtubeId === 'dQw4w9WgXcQ' && gLesson.segments.length >= 1, 'the lesson plays the video and remembers its transcript is by AI');
   videoAnswer = null;
 
@@ -1025,7 +1043,8 @@ try {
   D().getElementById('yt').value = 'https://youtu.be/dQw4w9WgXcQ';
   D().getElementById('yt').dispatchEvent(new Event('input'));
   await until(() => /can’t download/.test(D().getElementById('yt-status').textContent));
-  ok(D().querySelector('#yt-status a[href="#/account"]') && D().getElementById('help'), 'without a server, the phone explains how to import (account link, help)');
+  ok(D().querySelector('#yt-status a[href="#/account"]') && D().querySelector('#yt-status a[href="#/settings/ai"]') && D().getElementById('help'),
+    'without a server or AI, the phone says why in one line, with buttons to set up a free AI or log in');
   W().fetch = realFetch;
   W().__lingoGemini = savedGemini;
 

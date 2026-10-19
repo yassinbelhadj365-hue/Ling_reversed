@@ -64,27 +64,13 @@ export async function renderImport(view, arg) {
           Merge short caption lines into sentences</label>
         <details id="help">
           <summary class="small"><b>On a phone? / Transcript didn’t load?</b></summary>
-      <p class="small">Only a <b>computer</b> running <b>Start Lingo Reader</b> can download from YouTube (YouTube refuses
-        requests from other websites, and phones can’t run the helper). There are a few ways to import on your phone:</p>
-      <ol class="small">
-        <li><b>With the AI set up</b> (a free Gemini key in Settings, or logged in to an account whose server shares one),
-          pasting a link works anywhere: if the captions can’t be downloaded, Gemini watches the video and writes the
-          transcript itself (about a minute per 10 minutes of video).</li>
-        <li><b>iPhone:</b> set up the free <a href="https://github.com/yassinbelhadj365-hue/Ling_reversed/blob/main/docs/IPHONE_SHORTCUT.md" target="_blank" rel="noopener">Lingo transcript Shortcut</a>
-          once. Then share a video to it from the YouTube app, come back here and tap <b>📋 Paste</b>.</li>
-        <li><b>The Lingo Reader phone app</b> (docs/MOBILE.md) downloads transcripts itself: paste a link and it just works.</li>
-        <li><b>Cloud helper (no computer needed):</b> if you added the free <i>transcript</i> function to your sync
-          server (docs/SYNC_SETUP.md), pasting a link works directly. YouTube sometimes refuses it; then the next option kicks in.</li>
-        <li><b>Let your computer do it (easiest).</b> Log in to the same account on your phone and computer (top right,
-          see <i>Account</i>). Paste the link here and press <b>Import</b>. Next time Lingo Reader is open on your
-          computer, it fetches the transcript (or transcribes it with AI). The lesson then appears in your phone’s Library.</li>
-        <li><b>Same Wi-Fi:</b> start the app on your computer with <code>serve.ps1 -Lan</code> and open the address it
-          prints on your phone. Then everything works directly, like on the computer.</li>
-        <li><b>By hand:</b> open the video in your phone’s browser, choose <i>Desktop site</i> in the menu, tap <b>…more</b> under
-          the title, then <b>Show transcript</b>. Select the transcript text, copy it, and paste it above (📋 Paste).
-          Subtitle files (.srt/.vtt) work too.</li>
-      </ol>
-      <p class="small muted">On Android, after installing the app you can also use <b>Share → Lingo Reader</b> from the YouTube app.</p>
+      <ul class="small">
+        <li><b>Any device with a free AI</b> (<a href="#/settings/ai">Settings → AI</a>): paste a link and Gemini writes the
+          transcript when the captions can’t be downloaded.</li>
+        <li><b>Logged in on your phone and computer:</b> “Send to my computer” fetches it there; the lesson then
+          appears in your phone’s Library.</li>
+        <li><b>By hand:</b> paste a transcript or choose a subtitle file (.srt/.vtt).</li>
+      </ul>
         </details>
       </details>
     </div>
@@ -136,6 +122,15 @@ export async function renderImport(view, arg) {
   const status = (msg, html = false) => { $('#yt-status')[html ? 'innerHTML' : 'textContent'] = msg; };
   const trackLabel = (t) => `${t.name}${t.kind === 'auto' && !/auto/i.test(t.name) ? ' (auto-generated)' : ''}`;
   let fetchedFor = null;
+  // A link given on its own (pasted, shared, or from the Library's Paste button) opens its lesson as
+  // soon as the transcript is ready, unless there are several captions in this language to choose from.
+  let autoOpen = false;
+  const openWhenReady = (r) => {
+    const choices = (r.tracks || []).filter((t) => (t.lang || '').split('-')[0] === lang()).length;
+    if (!autoOpen || choices > 1) return;
+    autoOpen = false;
+    $('#go').click();
+  };
   let shortcut = null; // captions brought by the iPhone Shortcut (youtube.js parseShortcut)
 
   // Text copied by the iPhone Shortcut: load it like a downloaded transcript.
@@ -143,6 +138,7 @@ export async function renderImport(view, arg) {
     const s = parseShortcut(text);
     if (!s) return false;
     shortcut = s;
+    autoOpen = true;
     $('#yt').value = `https://www.youtube.com/watch?v=${s.videoId}`;
     $('#text').value = '';
     fetchTranscript();
@@ -150,19 +146,23 @@ export async function renderImport(view, arg) {
   }
   let noServer = false; // this device can't download from YouTube
 
-  function explainNoServer() {
+  // Nothing here could get the transcript: say why in one line, with the one or two things that
+  // fix it as buttons (try again, or let the computer do it), never a page of instructions.
+  async function explainNoServer() {
     noServer = true;
-    const why = geminiError ? `Gemini couldn’t transcribe it (${esc(geminiError)}), so `
-      : cloudOutcome === 'blocked' ? 'YouTube refused the cloud helper this time, so '
-      : cloudOutcome === 'network' ? 'The cloud helper couldn’t reach YouTube, so ' : 'This device can’t download from YouTube itself, so ';
-    if (canRelay()) {
-      status(`${why}press <b>Import</b>: your computer will get the transcript the next time Lingo Reader is open there, and the lesson will appear in your Library.`, true);
-    } else {
-      status((geminiError ? `Gemini couldn’t transcribe it (${esc(geminiError)}). ` : '')
-        + 'This device can’t download from YouTube itself (only a computer running Start Lingo Reader can). '
-        + '<a href="#/account">Log in to your account</a> on this phone and your computer, then your computer can do it for you. '
-        + 'Or paste the transcript into the box — see “On a phone?” under More options.', true);
-    }
+    const why = geminiError ? `Gemini couldn’t transcribe it (${esc(geminiError)}).`
+      : cloudOutcome === 'blocked' ? 'YouTube refused the cloud helper this time.'
+      : cloudOutcome === 'network' ? 'The cloud helper couldn’t reach YouTube.'
+      : 'This device can’t download from YouTube itself.';
+    const ai = await hasProvider({ video: true });
+    const fixes = [
+      ai || cloudOutcome === 'blocked' || cloudOutcome === 'network' ? '<button class="btn small" type="button" data-retry>Try again</button>' : '<a class="btn small" href="#/settings/ai">Set up a free AI</a>',
+      canRelay() ? '<button class="btn small primary" type="button" data-relay>Send to my computer</button>' : '<a class="btn small" href="#/account">Log in to let your computer do it</a>',
+    ];
+    if (!$('#yt-status')) return;
+    status(`${why}<span class="row" style="margin-top:6px">${fixes.join('')}</span>`, true);
+    $('#yt-status [data-retry]')?.addEventListener('click', () => fetchTranscript());
+    $('#yt-status [data-relay]')?.addEventListener('click', () => relay('transcript'));
   }
 
   // Gemini writes the transcript from the video itself (js/video-ai.js).
@@ -199,6 +199,11 @@ export async function renderImport(view, arg) {
       : await serverTranscript(id, lang(), track);
     // Nothing here can download the captions: let Gemini watch the video.
     if (!r && $('#yt-fetch')) r = await viaGemini(id);
+    // The video has no captions at all: Gemini listens to it instead, with no button to press.
+    if (r && !r.ok && r.error === 'no-captions' && $('#yt-fetch') && await hasProvider({ video: true })) {
+      status('This video has no captions: Gemini is listening to it instead…');
+      r = (await viaGemini(id)) || r;
+    }
     if (!$('#yt-fetch')) return false; // the import screen was left in the meantime
     $('#yt-fetch').disabled = false;
     if (!r) {
@@ -227,9 +232,11 @@ export async function renderImport(view, arg) {
     fetchedFor = id;
     if (aiMade) {
       status('✓ Gemini wrote the transcript from the video. AI transcripts can contain mistakes — you can correct any line with ✎ in the lesson.');
+      openWhenReady(r);
       return true;
     }
     status(`✓ Loaded “${trackLabel(r.track)}” captions${r.via === 'cloud' ? ' (through your cloud helper)' : r.via === 'shortcut' ? ' (from the iPhone Shortcut)' : ''}.${r.track.kind === 'auto' ? ' Auto-generated captions may contain mistakes.' : ''}`);
+    openWhenReady(r);
     return true;
   }
 
@@ -294,6 +301,7 @@ export async function renderImport(view, arg) {
     if (value.startsWith(SHORTCUT_MARK)) return useShortcut($('#text').value);
     // Just a YouTube link in the main box: treat it as the video and load its transcript.
     if (youTubeId(value) && !/\s/.test(value)) {
+      autoOpen = true;
       $('#yt').value = value;
       $('#text').value = '';
       $('#yt').dispatchEvent(new Event('input'));
@@ -311,6 +319,7 @@ export async function renderImport(view, arg) {
     if (useShortcut(clip)) return;
     const id = youTubeId(clip.trim());
     if (id && clip.trim().split(/\s+/).length === 1) {
+      autoOpen = true;
       $('#yt').value = clip.trim();
       $('#yt').dispatchEvent(new Event('input'));
     } else {
@@ -400,6 +409,7 @@ export async function renderImport(view, arg) {
   if (shared) {
     const link = (shared.url || shared.text || '').match(/https?:\/\/\S+/)?.[0] || '';
     if (youTubeId(link)) {
+      autoOpen = true;
       $('#yt').value = link;
       if (shared.title && !/^https?:/.test(shared.title)) $('#title').value = shared.title;
       $('#yt').dispatchEvent(new Event('input'));
